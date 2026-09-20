@@ -13,6 +13,7 @@ const insufficient = ref(false)
 function ask() {
   if (mock.qaMode === 'archive' && !question.value.includes('E-500')) {
     insufficient.value = true
+    mock.messages.push({ id: `u-gap-${Date.now()}`, role: 'user', text: question.value })
     mock.messages.push({
       id: `gap-${Date.now()}`,
       role: 'assistant',

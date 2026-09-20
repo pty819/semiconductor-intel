@@ -28,6 +28,7 @@ export const useMockStore = defineStore('mock', () => {
   const sortBy = ref<'occurred' | 'discovered'>('occurred')
   const cancelled = ref(false)
   let es: EventSource | null = null
+  const sseTimers: number[] = []
 
   const topics = [
     { id: 'top-rf', name: 'RF / 射频' },
@@ -158,8 +159,13 @@ export const useMockStore = defineStore('mock', () => {
 
   const locate = computed(() => locateQuoteInParse(parse, evidence))
 
+  function clearSseTimers() {
+    while (sseTimers.length) window.clearTimeout(sseTimers.pop())
+  }
+
   function startSseMock() {
     cancelled.value = false
+    clearSseTimers()
     sseConnected.value = true
     ssePhase.value = 'retrieving'
     es?.close()
@@ -169,16 +175,20 @@ export const useMockStore = defineStore('mock', () => {
       },
     } as EventSource
     sseConnected.value = true
-    window.setTimeout(() => {
-      if (!cancelled.value) ssePhase.value = 'extracting · 资料 3 · 引用已验证 1'
-    }, 400)
-    window.setTimeout(() => {
-      if (!cancelled.value) ssePhase.value = 'completed'
-      es?.close()
-    }, 900)
+    sseTimers.push(
+      window.setTimeout(() => {
+        if (!cancelled.value) ssePhase.value = 'extracting · 资料 3 · 引用已验证 1'
+      }, 400),
+    )
+    sseTimers.push(
+      window.setTimeout(() => {
+        if (!cancelled.value) ssePhase.value = 'completed'
+      }, 900),
+    )
   }
 
   function dropSse() {
+    clearSseTimers()
     es?.close()
     sseConnected.value = false
     ssePhase.value = 'SSE 断开，已降级轮询'
