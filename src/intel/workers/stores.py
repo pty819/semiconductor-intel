@@ -222,6 +222,27 @@ class SqlAlchemyExtractStore:
         ).scalar_one_or_none()
         return str(row or "fulltext")
 
+    async def get_origin_ref(self, parse_id: UUID) -> str | None:
+        """The parse's document canonical URL — the origin source
+        families dedupe on (EVT-01): reposts of one announcement share
+        the family regardless of which industry extracted them."""
+        await bind_app(self.conn, self.scope)
+        from intel.db.models.pool import Document
+
+        row = (
+            await self.conn.execute(
+                select(Document.canonical_url)
+                .select_from(ParsedArtifact)
+                .join(Capture, Capture.id == ParsedArtifact.capture_id)
+                .join(Document, Document.id == Capture.document_id)
+                .where(
+                    ParsedArtifact.owner_id == self.scope.owner_id,
+                    ParsedArtifact.id == parse_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return row or None
+
 
 class SqlAlchemyEventBuildStore:
     """EventBuildStore: claims for one extraction run + KnowledgeStore."""

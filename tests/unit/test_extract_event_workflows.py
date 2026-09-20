@@ -220,6 +220,7 @@ class ExtractStoreDouble:
     knowledge: InMemoryKnowledgeStore
     blocks: dict[UUID, list[SourceBlock]]
     jobs_db: InMemoryJobsDatabase = field(default_factory=InMemoryJobsDatabase)
+    origins: dict[UUID, str] = field(default_factory=dict)
 
     @property
     def jobs(self):
@@ -230,6 +231,9 @@ class ExtractStoreDouble:
 
     async def get_retrieval_scope(self, parse_id):
         return "fulltext"
+
+    async def get_origin_ref(self, parse_id):
+        return self.origins.get(parse_id)
 
 
 GOOD_CLAIM = ClaimProposal(
@@ -346,6 +350,105 @@ class TestExtractHandler:
         ] == []
         assert result.progress["event_build_job"] is None
 
+    async def test_wired_judge_statuses_reach_evidence_rows(self):
+        """I-1: the seam RETURNS per-claim statuses (no frozen-DTO
+        mutation — that path raised FrozenInstanceError); unknown
+        vocabulary downgrades to uncertain, unwired stays pending."""
+        parse_id = uuid4()
+        store = ExtractStoreDouble(
+            knowledge=InMemoryKnowledgeStore(), blocks={parse_id: BLOCKS}
+        )
+
+        def judge(claim, quotes) -> str:
+            del claim, quotes
+            return "supports"
+
+        @asynccontextmanager
+        async def open(scope):
+            yield store
+
+        wiring = ExtractWiring(
+            open_store=open,
+            agent=FakeExtractAgent(ExtractionProposal(claims=[GOOD_CLAIM])),
+            jobs=JobService(),
+            semantic_judge=judge,
+        )
+        runner, db, service = _runner("extract", make_extract_handler(wiring), open)
+        await service.enqueue(
+            InMemoryJobsStore(db),
+            IndustryScope(OWNER, INDUSTRY_A),
+            kind="extract",
+            payload={"parse_id": str(parse_id)},
+            idempotency_key=f"extract:{parse_id}",
+        )
+        result = await runner.run_once()
+        assert result is not None and result.state == "succeeded"
+        evidence = next(iter(store.knowledge.evidence.values()))
+        assert evidence["semantic_support_status"] == "supports"
+
+    async def test_judge_status_outside_vocabulary_downgrades(self):
+        parse_id = uuid4()
+        store = ExtractStoreDouble(
+            knowledge=InMemoryKnowledgeStore(), blocks={parse_id: BLOCKS}
+        )
+
+        @asynccontextmanager
+        async def open(scope):
+            yield store
+
+        wiring = ExtractWiring(
+            open_store=open,
+            agent=FakeExtractAgent(ExtractionProposal(claims=[GOOD_CLAIM])),
+            jobs=JobService(),
+            semantic_judge=lambda claim, quotes: "definitely",
+        )
+        runner, db, service = _runner("extract", make_extract_handler(wiring), open)
+        await service.enqueue(
+            InMemoryJobsStore(db),
+            IndustryScope(OWNER, INDUSTRY_A),
+            kind="extract",
+            payload={"parse_id": str(parse_id)},
+            idempotency_key=f"extract:{parse_id}",
+        )
+        result = await runner.run_once()
+        assert result is not None and result.state == "succeeded"
+        evidence = next(iter(store.knowledge.evidence.values()))
+        assert evidence["semantic_support_status"] == "uncertain"
+
+    async def test_origin_ref_looked_up_per_document(self):
+        """I-4: origin comes from the store (per-document canonical URL),
+        not the static wiring constant — evidence lands in a family."""
+        parse_id = uuid4()
+        canonical = "https://corp.example.com/pr/1"
+        store = ExtractStoreDouble(
+            knowledge=InMemoryKnowledgeStore(),
+            blocks={parse_id: BLOCKS},
+            origins={parse_id: canonical},
+        )
+
+        @asynccontextmanager
+        async def open(scope):
+            yield store
+
+        wiring = ExtractWiring(
+            open_store=open,
+            agent=FakeExtractAgent(ExtractionProposal(claims=[GOOD_CLAIM])),
+            jobs=JobService(),
+        )
+        runner, db, service = _runner("extract", make_extract_handler(wiring), open)
+        await service.enqueue(
+            InMemoryJobsStore(db),
+            IndustryScope(OWNER, INDUSTRY_A),
+            kind="extract",
+            payload={"parse_id": str(parse_id)},
+            idempotency_key=f"extract:{parse_id}",
+        )
+        result = await runner.run_once()
+        assert result is not None and result.state == "succeeded"
+        assert canonical in store.knowledge.families
+        evidence = next(iter(store.knowledge.evidence.values()))
+        assert evidence["source_family_id"] == store.knowledge.families[canonical]
+
 
 @dataclass
 class _EventProposal:
@@ -455,3 +558,48 @@ class TestEventBuildHandler:
         result = await runner.run_once()
         assert result is not None and result.state == "failed"
         assert result.error["code"] == "extraction_missing"
+
+    async def test_hallucinated_claim_ids_dropped_not_linked(self):
+        """I-3: proposal.claim_ids are filtered against the run's
+        committed claim set — extras are counted, never inserted."""
+        knowledge = InMemoryKnowledgeStore()
+        run_id = uuid4()
+        good_claim = uuid4()
+        store = EventBuildStoreDouble(
+            knowledge=knowledge,
+            claims_by_run={run_id: [{"id": str(good_claim), "text": "陈述"}]},
+        )
+
+        @asynccontextmanager
+        async def open(scope):
+            yield store
+
+        wiring = EventBuildWiring(
+            open_store=open,
+            agent=FakeEventAgent(
+                _EventProposals(
+                    [
+                        _EventProposal(
+                            "commercial_announcement",
+                            "采购协议",
+                            claim_ids=[str(good_claim), str(uuid4())],
+                        )
+                    ]
+                )
+            ),
+        )
+        runner, db, service = _runner(
+            "event_build", make_event_build_handler(wiring), open
+        )
+        await service.enqueue(
+            InMemoryJobsStore(db),
+            IndustryScope(OWNER, INDUSTRY_A),
+            kind="event_build",
+            payload={"extraction_run_id": str(run_id)},
+            idempotency_key=f"event_build:{run_id}",
+        )
+        result = await runner.run_once()
+        assert result is not None and result.state == "succeeded"
+        assert result.progress["dropped_claim_references"] == 1
+        linked = [ids for ids in knowledge.event_claims.values()]
+        assert linked == [[good_claim]]

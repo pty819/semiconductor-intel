@@ -171,6 +171,9 @@ class ExtractStoreDouble:
     async def get_retrieval_scope(self, parse_id):
         return "fulltext"
 
+    async def get_origin_ref(self, parse_id):
+        return None
+
 
 def load_samples(fixtures_root: Path) -> list[dict[str, Any]]:
     samples: list[dict[str, Any]] = []

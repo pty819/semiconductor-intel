@@ -210,6 +210,14 @@ def _quote_sha256(exact_quote: str) -> str:
     return hashlib.sha256(exact_quote.encode()).hexdigest()
 
 
+#: EVI-02 semantic-support statuses commit_extraction persists: ``pending``
+#: is the unwired default (literal quote hit is not semantic support);
+#: anything a wired judge returns outside this set downgrades to
+#: ``uncertain`` (code validates — the model never chooses the storage
+#: vocabulary).
+_SEMANTIC_STATUSES = frozenset({"pending", "supports", "refutes", "uncertain"})
+
+
 async def commit_extraction(
     store: KnowledgeStore,
     scope: IndustryScope,
@@ -220,12 +228,19 @@ async def commit_extraction(
     extraction_run_id: UUID,
     input_manifest: dict,
     origin_ref: str | None,
+    semantic_status_by_index: Mapping[int, str] | None = None,
 ) -> ExtractionCommit:
     """Persist one parse's validated extraction inside one transaction.
 
     Source-family dedup: all evidence from reposts of one announcement
     (same origin_ref) shares ONE source_family row — independence is a
     per-claim fact derived from families, never a document count (05 §3).
+
+    ``semantic_status_by_index`` carries the optional second-pass EVI-02
+    verdict per accepted claim (index into ``validated_claims``); claims
+    without an entry stay ``pending`` — a literal quote hit is not yet
+    semantic support. The workflow RETURNS these statuses from its judge
+    seam; nothing mutates the frozen validated DTOs.
     """
     commit = ExtractionCommit(rejected=[dict(item) for item in rejected])
     family_id: UUID | None = None
@@ -239,7 +254,7 @@ async def commit_extraction(
             )
             commit.source_family_ids.append(family_id)
 
-    for validated in validated_claims:
+    for index, validated in enumerate(validated_claims):
         claim = validated.claim
         kind = (
             "inference"
@@ -247,6 +262,10 @@ async def commit_extraction(
             and not (claim.attribution or "").strip()
             else claim.kind
         )
+        status = "pending"
+        if semantic_status_by_index is not None:
+            raw = str(semantic_status_by_index.get(index, "pending"))
+            status = raw if raw in _SEMANTIC_STATUSES else "uncertain"
         claim_id, revision_id = await store.insert_claim_with_revision(
             scope,
             text=claim.text,
@@ -272,10 +291,7 @@ async def commit_extraction(
                 end_char=location.end_char,
                 exact_quote=location.exact_quote,
                 relation=evidence.relation,
-                # The workflow's second-pass LLM judgement (EVI-02)
-                # updates this; pending until then — literal hit is not
-                # semantic support.
-                semantic_support_status="pending",
+                semantic_support_status=status,
                 source_family_id=family_id,
                 extraction_run_id=extraction_run_id,
             )

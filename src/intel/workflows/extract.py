@@ -49,6 +49,10 @@ class ExtractStore(Protocol):
 
     async def get_retrieval_scope(self, parse_id: UUID) -> str: ...
 
+    async def get_origin_ref(self, parse_id: UUID) -> str | None:
+        """Per-document origin reference (parse → capture → document's
+        canonical URL) — what source families dedupe on (EVT-01)."""
+
     knowledge: KnowledgeStore
 
     #: same-transaction job queue handle (the RouteStore pattern)
@@ -78,6 +82,10 @@ def make_extract_handler(wiring: ExtractWiring) -> JobHandler:
         async with wiring.open_store(ctx.scope) as store:
             blocks = await store.get_source_blocks(parse_id)
             retrieval_scope = await store.get_retrieval_scope(parse_id)
+            # Origin is per-document data (the document's canonical URL),
+            # not a static wiring constant; the wiring value, when set,
+            # stays as an explicit override (I-4).
+            origin_ref = wiring.origin_ref or await store.get_origin_ref(parse_id)
         if blocks is None:
             raise JobFailure("parse_missing", f"parse {parse_id} gone")
         await ctx.boundary()
@@ -99,15 +107,16 @@ def make_extract_handler(wiring: ExtractWiring) -> JobHandler:
         claims = list(getattr(proposal, "claims", []) or [])
         result = validate_proposal(claims, block_map)
 
+        # EVI-02 seam: the judge RETURNS one status per accepted claim;
+        # commit_extraction consumes them by index. Nothing mutates the
+        # frozen validated DTOs (that path raised FrozenInstanceError).
+        semantic_status_by_index: dict[int, str] = {}
         if wiring.semantic_judge is not None:
-            for validated in result.accepted:
-                status = wiring.semantic_judge(
+            for index, validated in enumerate(result.accepted):
+                semantic_status_by_index[index] = wiring.semantic_judge(
                     validated.claim,
                     [location.exact_quote for location in validated.locations],
                 )
-                for location in validated.locations:
-                    location_verdict = status
-                    location.semantic = location_verdict
 
         manifest = {
             "parse_id": str(parse_id),
@@ -126,7 +135,8 @@ def make_extract_handler(wiring: ExtractWiring) -> JobHandler:
                 parse_id=parse_id,
                 extraction_run_id=extraction_run_id,
                 input_manifest=manifest,
-                origin_ref=wiring.origin_ref,
+                origin_ref=origin_ref,
+                semantic_status_by_index=semantic_status_by_index,
             )
             if result.accepted:
                 # Claims landed: schedule this run's event building in the
