@@ -7,6 +7,10 @@ dependencies = [
   "alembic", "pydantic>=2.9", "pydantic-settings", "httpx", "feedparser",
   "beautifulsoup4", "lxml", "pypdf", "python-multipart", "argon2-cffi",
   "msgpack", "structlog",
+  # Browser rendering fallback for JS-required pages (Task 7). The
+  # browser binaries are NOT installed in the offline dev environment;
+  # the renderer degrades to outcome=browser_unavailable instead.
+  "playwright",
   # NOOA agent framework, pinned to the local checkout (d4d46f7) via tool.uv.sources below.
   "nooa",
 ]

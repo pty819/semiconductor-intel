@@ -155,6 +155,10 @@ KIND_SPECS: dict[str, KindSpec] = {
         # Scheduler-internal periodic watch check (spec 03 §4 首版定期检查
         # 仅本地归档): keyed per watch per cadence slot.
         KindSpec("watch_check", ("industry", "watch", "schedule_slot")),
+        # API-triggered poll (08 §2): the poll endpoint enqueues this kind
+        # with the request's Idempotency-Key; it maps to discover
+        # semantics in the runner (Task 6 ruling, Task 7 wiring).
+        KindSpec("source_poll", ("owner", "feed", "mode", "idempotency_key"), 5),
     )
 }
 
