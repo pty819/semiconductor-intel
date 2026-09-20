@@ -1,0 +1,115 @@
+# semiconductor-intel Postgres 18 image (built ON the NAS, aarch64).
+#
+# Verified facts encoded below (checked 2026-09-20 against upstream):
+#   * Base image is Debian trixie with the PGDG apt repo preconfigured and
+#     PG_MAJOR=18; the server-dev headers package for PG18 on trixie-pgdg is
+#     `postgresql-server-dev-18` (NOT postgresql-dev-18 — verified in the repo
+#     index: https://apt.postgresql.org/pub/repos/apt/dists/trixie-pgdg/main/binary-arm64/Packages.gz
+#     and the base Dockerfile https://github.com/docker-library/postgres/blob/master/18/trixie/Dockerfile).
+#   * postgres:18 changed layout: ENV PGDATA=/var/lib/postgresql/18/docker and
+#     VOLUME /var/lib/postgresql (no longer /var/lib/postgresql/data) — see the
+#     base Dockerfile. setup-nas.sh therefore bind-mounts the host pgdata dir
+#     over /var/lib/postgresql and keeps the image default PGDATA.
+#
+# Extension pins (all verified):
+#   pgvector       v0.8.6   PostgreSQL License  https://github.com/pgvector/pgvector
+#   pg_textsearch  v1.4.0   PostgreSQL License  https://github.com/timescale/pg_textsearch
+#               (PG17/18 only; C extension, plain make; README requires
+#                shared_preload_libraries='pg_textsearch')
+#   pg_jieba       1.1.1 @ d0ffac8028328b2566a889ff4db3d74ba63d1b42 (last master
+#                  commit, 2022-11-22)  BSD-3-Clause  https://github.com/jaiminpan/pg_jieba
+#                  (cmake out-of-tree build; needs git submodules for cppjieba)
+#   pgvectorscale  0.9.1    PostgreSQL License  https://github.com/timescale/pgvectorscale
+#                  (Cargo.toml at tag 0.9.1 pins pgrx "=0.16.1"; release 0.9.1
+#                   supports PG18; Rust source build — see README for the
+#                   prebuilt pg18-arm64 zip alternative)
+#
+# Build (on the NAS):  podman build -t semiconductor-intel-pg:18 <dir-with-this-file>
+# Expect ~30-60 min on aarch64 (the pgvectorscale release profile uses
+# lto=fat + codegen-units=1; CARGO_BUILD_JOBS=2 below is a RAM guard for the
+# 7.7 GB host).
+
+FROM docker.io/library/postgres:18
+
+# One RUN = one layer: install build deps, build+install all four extensions,
+# then purge the toolchain so it does not bloat the final image.
+# libstdc++6 is kept: pg_jieba is C++ and the runtime image may not ship it.
+# clang/libclang-dev are required by pgrx's bindgen (pgrx prerequisites:
+# https://github.com/pgcentralfoundation/pgrx — "install libclang").
+RUN set -eux; \
+    export DEBIAN_FRONTEND=noninteractive; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        git \
+        curl \
+        pkg-config \
+        clang \
+        libclang-dev \
+        libstdc++6 \
+        postgresql-server-dev-18; \
+    mkdir -p /usr/local/src; \
+    \
+    # ---- 1. pgvector v0.8.6 (C; make/make install per its README) ----
+    git clone --depth 1 --branch v0.8.6 https://github.com/pgvector/pgvector.git /usr/local/src/pgvector; \
+    make -C /usr/local/src/pgvector -j"$(nproc)"; \
+    make -C /usr/local/src/pgvector install; \
+    \
+    # ---- 2. pg_textsearch v1.4.0 (C; make/make install per its README) ----
+    git clone --depth 1 --branch v1.4.0 https://github.com/timescale/pg_textsearch.git /usr/local/src/pg_textsearch; \
+    make -C /usr/local/src/pg_textsearch -j"$(nproc)"; \
+    make -C /usr/local/src/pg_textsearch install; \
+    \
+    # ---- 3. pg_jieba 1.1.1 @ d0ffac8 (C++; cmake out-of-tree per its README,
+    #          `git submodule update --init --recursive` fetches cppjieba+dicts) ----
+    git clone https://github.com/jaiminpan/pg_jieba.git /usr/local/src/pg_jieba; \
+    git -C /usr/local/src/pg_jieba checkout d0ffac8028328b2566a889ff4db3d74ba63d1b42; \
+    git -C /usr/local/src/pg_jieba submodule update --init --recursive; \
+    cmake -B /usr/local/src/pg_jieba/build -S /usr/local/src/pg_jieba; \
+    cmake --build /usr/local/src/pg_jieba/build --parallel "$(nproc)"; \
+    make -C /usr/local/src/pg_jieba/build install; \
+    \
+    # ---- 4. pgvectorscale 0.9.1 (Rust/pgrx; build steps per its README:
+    #          rustup -> cargo-pgrx at the repo's pgrx version ->
+    #          `cargo pgrx init --pg18 $(which pg_config)` -> `cargo pgrx install --release`.
+    #          pgrx pin "=0.16.1" verified in pgvectorscale/Cargo.toml @ tag 0.9.1) ----
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal; \
+    . "$HOME/.cargo/env"; \
+    cargo install --locked cargo-pgrx --version 0.16.1; \
+    git clone --depth 1 --branch 0.9.1 https://github.com/timescale/pgvectorscale.git /usr/local/src/pgvectorscale; \
+    cd /usr/local/src/pgvectorscale/pgvectorscale; \
+    cargo pgrx init --pg18 "$(command -v pg_config)"; \
+    CARGO_BUILD_JOBS=2 cargo pgrx install --release; \
+    \
+    # sanity: all four .control files landed in PG18's extension dir
+    # (done BEFORE the purge — pg_config ships in the dev package)
+    ls "$(pg_config --sharedir)/extension"/vector.control \
+       "$(pg_config --sharedir)/extension"/vectorscale.control \
+       "$(pg_config --sharedir)/extension"/pg_textsearch.control \
+       "$(pg_config --sharedir)/extension"/pg_jieba.control; \
+    \
+    # ---- cleanup build toolchain (same layer) ----
+    cd /; \
+    apt-get purge -y --auto-remove \
+        build-essential cmake git curl pkg-config clang libclang-dev \
+        postgresql-server-dev-18; \
+    rm -rf /root/.cargo /root/.rustup /usr/local/src /var/lib/apt/lists/*
+
+# First-boot init: create the extensions + the `jieba` text search config.
+# Runs only when PGDATA is empty (postgres entrypoint contract).
+COPY --chmod=0755 init/40-intel-extensions.sh /docker-entrypoint-initdb.d/40-intel-extensions.sh
+
+# pg_textsearch REQUIRES shared_preload_libraries (its README: set it, then
+# restart). Baked into CMD so any `podman run` of this image gets it for free
+# (the entrypoint also propagates these args to the temporary initdb server).
+# pg_jieba does NOT need preloading for our usage — its README states the
+# pg_jieba.* GUCs (custom dicts) only become available under
+# shared_preload_libraries; we use the built-in dicts, so it stays out.
+# If a custom user dict is added later, change this to:
+#   ["postgres", "-c", "shared_preload_libraries=pg_textsearch,pg_jieba"]
+CMD ["postgres", "-c", "shared_preload_libraries=pg_textsearch"]
+
+# Data-checksums for the first initdb (entrypoint reads POSTGRES_INITDB_ARGS).
+# Only takes effect on an empty PGDATA; harmless afterwards.
+ENV POSTGRES_INITDB_ARGS="--data-checksums"
