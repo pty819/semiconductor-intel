@@ -290,3 +290,283 @@ async def test_local_guc_does_not_leak_across_transactions(
             assert value is None
             with pytest.raises(ScopeMissing):
                 await require_owner_guc(conn)
+
+
+# --- Task 3 tables: representative RLS cases --------------------------------
+
+
+async def _seed_evidence_chain(conn, owner: str, industry: str) -> dict[str, str]:
+    """Insert the minimal blob→document→capture→parse→claim chain plus the
+    extraction job, all inside the caller's transaction/scope."""
+    blob, doc, capture, parse = uuid4(), uuid4(), uuid4(), uuid4()
+    parser, job = uuid4(), uuid4()
+    claim, claim_rev, evidence = uuid4(), uuid4(), uuid4()
+    await conn.execute(
+        text(
+            "INSERT INTO parser_versions (id, parser_key, version, config,"
+            " config_hash, code_commit, status, fixture_manifest)"
+            " VALUES (:id, 'html', 1, '{}', 'h1', 'c0', 'published', '{}')"
+        ),
+        {"id": str(parser)},
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO blobs (id, owner_id, object_key, sha256, media_type,"
+            " byte_size, retention_class)"
+            " VALUES (:id, :owner, 'k1', 'b64', 'text/html', 10, 'standard')"
+        ),
+        {"id": str(blob), "owner": owner},
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO documents (id, owner_id, canonical_url,"
+            " identity_namespace, identity_value, visibility_scope_key,"
+            " origin_kind)"
+            " VALUES (:id, :owner, :url, 'url', :ival, 'public', 'feed')"
+        ),
+        {
+            "id": str(doc),
+            "owner": owner,
+            "url": f"https://example.com/{doc.hex[:8]}",
+            "ival": doc.hex[:12],
+        },
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO captures (id, owner_id, document_id, raw_blob_id,"
+            " response_status, effective_url, content_hash, content_type,"
+            " retrieval_scope, access_policy)"
+            " VALUES (:id, :owner, :doc, :blob, 200, 'https://example.com/a',"
+            " 'ch1', 'text/html', 'fulltext', 'public')"
+        ),
+        {"id": str(capture), "owner": owner, "doc": str(doc), "blob": str(blob)},
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO parsed_artifacts (id, owner_id, capture_id,"
+            " parser_version_id, normalized_blob_id, text_hash, blocks,"
+            " metadata, parse_status, coverage)"
+            " VALUES (:id, :owner, :capture, :parser, :blob, 'th1', '[]', '{}',"
+            " 'ok', '{}')"
+        ),
+        {
+            "id": str(parse),
+            "owner": owner,
+            "capture": str(capture),
+            "parser": str(parser),
+            "blob": str(blob),
+        },
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO jobs (id, owner_id, industry_id, kind, state, input,"
+            " idempotency_key)"
+            " VALUES (:id, :owner, :industry, 'extract_claims', 'succeeded',"
+            " '{}', :key)"
+        ),
+        {"id": str(job), "owner": owner, "industry": industry, "key": f"k-{job.hex[:8]}"},
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO claims (id, owner_id, industry_id, state)"
+            " VALUES (:id, :owner, :industry, 'active')"
+        ),
+        {"id": str(claim), "owner": owner, "industry": industry},
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO claim_revisions (id, owner_id, industry_id, claim_id,"
+            " version, text, kind, predicate, \"object\", conditions,"
+            " assessment, input_manifest)"
+            " VALUES (:id, :owner, :industry, :claim, 1, 't',"
+            " 'source_statement', 'p', '{}', '{}', '{}', '{}')"
+        ),
+        {"id": str(claim_rev), "owner": owner, "industry": industry,
+         "claim": str(claim)},
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO evidence (id, owner_id, industry_id,"
+            " claim_revision_id, parsed_artifact_id, block_id, start_char,"
+            " end_char, exact_quote, quote_sha256, relation,"
+            " semantic_support_status, extraction_run_id)"
+            " VALUES (:id, :owner, :industry, :rev, :parse, 'b0', 0, 5, 'quote',"
+            " 'q64', 'supports', 'verified', :job)"
+        ),
+        {
+            "id": str(evidence),
+            "owner": owner,
+            "industry": industry,
+            "rev": str(claim_rev),
+            "parse": str(parse),
+            "job": str(job),
+        },
+    )
+    return {"evidence": str(evidence)}
+
+
+async def test_evidence_is_industry_scoped(engine, seed: dict[str, str]) -> None:
+    """Evidence written under industry 1 must be invisible in industry 2 and
+    a cross-industry insert must be rejected by WITH CHECK (spec 03 §4:
+    不能用另一个行业的 evidence_id 为本行业结论背书)."""
+    async with engine.connect() as conn:
+        async with conn.begin():
+            await conn.execute(text("SET ROLE intel_app"))
+            await set_scope(conn, seed["owner_a"], seed["industry_1"])
+            await _seed_evidence_chain(conn, seed["owner_a"], seed["industry_1"])
+
+        async with conn.begin():
+            await conn.execute(text("SET ROLE intel_app"))
+            await set_scope(conn, seed["owner_a"], seed["industry_2"])
+            n = (
+                await conn.execute(text("SELECT count(*) FROM evidence"))
+            ).scalar_one()
+        assert n == 0, "evidence must not leak across industries"
+
+        with pytest.raises(DBAPIError, match="row-level security"):
+            async with conn.begin():
+                await conn.execute(text("SET ROLE intel_app"))
+                await set_scope(conn, seed["owner_a"], seed["industry_1"])
+                await conn.execute(
+                    text(
+                        "INSERT INTO evidence (id, owner_id, industry_id,"
+                        " claim_revision_id, parsed_artifact_id, block_id,"
+                        " start_char, end_char, exact_quote, quote_sha256,"
+                        " relation, semantic_support_status,"
+                        " extraction_run_id)"
+                        " VALUES (:id, :owner, :industry2, :rev, :parse, 'b0',"
+                        " 0, 5, 'q', 'q64', 'supports', 'verified', :job)"
+                    ),
+                    {
+                        "id": str(uuid4()),
+                        "owner": seed["owner_a"],
+                        "industry2": seed["industry_2"],
+                        "rev": str(uuid4()),
+                        "parse": str(uuid4()),
+                        "job": str(uuid4()),
+                    },
+                )
+
+
+async def test_jobs_visibility_is_owner_scoped(engine, seed: dict[str, str]) -> None:
+    """jobs is an O/I hybrid (nullable industry_id, owner-only RLS predicate,
+    spec 03 §7): owner B never sees owner A's jobs — including kind-level
+    (industry NULL) rows — and cross-owner writes are rejected; industry
+    scoping within one owner stays the repository's job (spec 10 §1)."""
+    scoped_job, kind_job = uuid4(), uuid4()
+    async with engine.connect() as conn:
+        async with conn.begin():
+            await conn.execute(text("SET ROLE intel_app"))
+            await set_scope(conn, seed["owner_a"], seed["industry_1"])
+            for jid, iid in ((scoped_job, seed["industry_1"]), (kind_job, None)):
+                await conn.execute(
+                    text(
+                        "INSERT INTO jobs (id, owner_id, industry_id, kind,"
+                        " state, input, idempotency_key)"
+                        " VALUES (:id, :owner, :industry, 'poll_feeds',"
+                        " 'queued', '{}', :key)"
+                    ),
+                    {
+                        "id": str(jid),
+                        "owner": seed["owner_a"],
+                        "industry": iid,
+                        "key": f"k-{jid.hex[:8]}",
+                    },
+                )
+
+        async with conn.begin():
+            await conn.execute(text("SET ROLE intel_app"))
+            await set_scope(conn, seed["owner_b"])
+            n = (await conn.execute(text("SELECT count(*) FROM jobs"))).scalar_one()
+        assert n == 0, "owner B must not see owner A's jobs"
+
+        with pytest.raises(DBAPIError, match="row-level security"):
+            async with conn.begin():
+                await conn.execute(text("SET ROLE intel_app"))
+                await set_scope(conn, seed["owner_a"])
+                await conn.execute(
+                    text(
+                        "INSERT INTO jobs (id, owner_id, industry_id, kind,"
+                        " state, input, idempotency_key)"
+                        " VALUES (:id, :owner_b, NULL, 'poll_feeds', 'queued',"
+                        " '{}', 'smuggled')"
+                    ),
+                    {"id": str(uuid4()), "owner_b": seed["owner_b"]},
+                )
+
+        # Owner A sees both rows regardless of which industry GUC is set —
+        # kind-level jobs survive industry switches.
+        for iid in (seed["industry_1"], seed["industry_2"]):
+            async with conn.begin():
+                await conn.execute(text("SET ROLE intel_app"))
+                await set_scope(conn, seed["owner_a"], iid)
+                n = (
+                    await conn.execute(text("SELECT count(*) FROM jobs"))
+                ).scalar_one()
+            assert n == 2
+
+
+async def test_generation_runs_scoped_by_industry(
+    engine, seed: dict[str, str]
+) -> None:
+    """generation_runs (doc 15 §3) is a full I table: invisible from another
+    industry of the same owner, and cross-industry writes are rejected."""
+    job, run = uuid4(), uuid4()
+    async with engine.connect() as conn:
+        async with conn.begin():
+            await conn.execute(text("SET ROLE intel_app"))
+            await set_scope(conn, seed["owner_a"], seed["industry_1"])
+            await conn.execute(
+                text(
+                    "INSERT INTO jobs (id, owner_id, industry_id, kind, state,"
+                    " input, idempotency_key)"
+                    " VALUES (:id, :owner, :industry, 'write_report',"
+                    " 'succeeded', '{}', :key)"
+                ),
+                {"id": str(job), "owner": seed["owner_a"],
+                 "industry": seed["industry_1"], "key": f"k-{job.hex[:8]}"},
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO generation_runs (id, owner_id, industry_id,"
+                    " job_id, attempt, step_key, trace_session_id, trace_state,"
+                    " viewer_import_state, nooa_commit, prompt_version,"
+                    " config_hash, input_manifest)"
+                    " VALUES (:id, :owner, :industry, :job, 1, 'draft',"
+                    " 'sess-1', 'available', 'not_requested', 'c0', 'v1',"
+                    " 'h1', '{}')"
+                ),
+                {"id": str(run), "owner": seed["owner_a"],
+                 "industry": seed["industry_1"], "job": str(job)},
+            )
+
+        async with conn.begin():
+            await conn.execute(text("SET ROLE intel_app"))
+            await set_scope(conn, seed["owner_a"], seed["industry_2"])
+            n = (
+                await conn.execute(text("SELECT count(*) FROM generation_runs"))
+            ).scalar_one()
+        assert n == 0
+
+        with pytest.raises(DBAPIError, match="row-level security"):
+            async with conn.begin():
+                await conn.execute(text("SET ROLE intel_app"))
+                await set_scope(conn, seed["owner_a"], seed["industry_1"])
+                await conn.execute(
+                    text(
+                        "INSERT INTO generation_runs (id, owner_id,"
+                        " industry_id, job_id, attempt, step_key,"
+                        " trace_session_id, trace_state, viewer_import_state,"
+                        " nooa_commit, prompt_version, config_hash,"
+                        " input_manifest)"
+                        " VALUES (:id, :owner, :industry2, :job, 1, 'draft',"
+                        " 'sess-2', 'recording', 'not_requested', 'c0', 'v1',"
+                        " 'h1', '{}')"
+                    ),
+                    {
+                        "id": str(uuid4()),
+                        "owner": seed["owner_a"],
+                        "industry2": seed["industry_2"],
+                        "job": str(job),
+                    },
+                )

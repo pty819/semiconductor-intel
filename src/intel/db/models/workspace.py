@@ -44,8 +44,10 @@ class Industry(OwnerScopeMixin, UUIDPrimaryKey, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
-    # Set once the first revision exists; composite FK (declared with
-    # use_alter below) keeps the pointer inside this owner's revisions.
+    # Set once the first revision exists; the composite FK keeps the pointer
+    # inside this owner's revisions. Circular reference — use_alter FKs are
+    # silently dropped by CreateTable rendering, so it is a regular
+    # constraint here and created by op.create_foreign_key in migration 0002.
     current_revision_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), nullable=True
     )
@@ -69,7 +71,6 @@ class Industry(OwnerScopeMixin, UUIDPrimaryKey, TimestampMixin, Base):
         ForeignKeyConstraint(
             ["owner_id", "current_revision_id"],
             ["industry_revisions.owner_id", "industry_revisions.id"],
-            use_alter=True,
         ),
     )
 
@@ -105,6 +106,12 @@ class IndustryRevision(
         ForeignKeyConstraint(
             ["owner_id", "industry_id"],
             ["industries.owner_id", "industries.id"],
+        ),
+        # created_by_job_id → jobs added by migration 0002 (O-style composite
+        # FK: industry revisions can be created by owner-scoped jobs).
+        ForeignKeyConstraint(
+            ["owner_id", "created_by_job_id"],
+            ["jobs.owner_id", "jobs.id"],
         ),
         Index("ix_industry_revisions_owner_industry", "owner_id", "industry_id"),
     )
@@ -147,7 +154,6 @@ class Topic(IndustryScopeMixin, UUIDPrimaryKey, TimestampMixin, Base):
                 "topic_revisions.industry_id",
                 "topic_revisions.id",
             ],
-            use_alter=True,
         ),
     )
 
@@ -183,6 +189,12 @@ class TopicRevision(IndustryScopeMixin, UUIDPrimaryKey, VersionMixin, Base):
         ForeignKeyConstraint(
             ["owner_id", "industry_id", "topic_id"],
             ["topics.owner_id", "topics.industry_id", "topics.id"],
+        ),
+        # created_by_job_id → jobs added by migration 0002 (I-style composite
+        # FK: topic revisions are produced by industry-scoped jobs).
+        ForeignKeyConstraint(
+            ["owner_id", "industry_id", "created_by_job_id"],
+            ["jobs.owner_id", "jobs.industry_id", "jobs.id"],
         ),
         Index(
             "ix_topic_revisions_owner_industry_topic",

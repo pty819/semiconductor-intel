@@ -173,7 +173,7 @@ class SourceRun(OwnerScopeMixin, UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "source_runs"
 
     feed_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
-    # FK to jobs.id added by the jobs migration (later task).
+    # job_id → jobs added by migration 0002 (O-style composite FK).
     job_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), nullable=False
@@ -207,6 +207,9 @@ class SourceRun(OwnerScopeMixin, UUIDPrimaryKey, TimestampMixin, Base):
         ),
         ForeignKeyConstraint(
             ["owner_id", "feed_id"], ["owner_feeds.owner_id", "owner_feeds.id"]
+        ),
+        ForeignKeyConstraint(
+            ["owner_id", "job_id"], ["jobs.owner_id", "jobs.id"]
         ),
         Index("ix_source_runs_owner_feed", "owner_id", "feed_id"),
     )

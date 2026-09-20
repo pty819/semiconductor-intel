@@ -151,12 +151,13 @@ class Document(OwnerScopeMixin, UUIDPrimaryKey, TimestampMixin, Base):
             ["owner_id", "target_industry_id"],
             ["industries.owner_id", "industries.id"],
         ),
-        # Declared after captures exists (use_alter): keeps the current
-        # pointer within this owner's captures.
+        # Declared after captures exists: keeps the current pointer within
+        # this owner's captures. Circular reference — use_alter FKs are
+        # silently dropped by CreateTable rendering, so it is a regular
+        # constraint here and created by op.create_foreign_key in 0002.
         ForeignKeyConstraint(
             ["owner_id", "current_capture_id"],
             ["captures.owner_id", "captures.id"],
-            use_alter=True,
         ),
         Index("ix_documents_owner_id", "owner_id"),
         Index(
@@ -428,7 +429,7 @@ class ProcessingDecision(OwnerScopeMixin, UUIDPrimaryKey, TimestampMixin, Base):
         ARRAY(Text), server_default=text("'{}'"), nullable=False
     )
     candidate_claims: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    # FKs land with the jobs / knowledge tables migrations (later tasks).
+    # FKs added by migration 0002 (model_runs / overrides are its tables).
     model_run_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), nullable=True
     )
@@ -462,6 +463,16 @@ class ProcessingDecision(OwnerScopeMixin, UUIDPrimaryKey, TimestampMixin, Base):
         ForeignKeyConstraint(
             ["owner_id", "industry_revision_id"],
             ["industry_revisions.owner_id", "industry_revisions.id"],
+        ),
+        # O-style composite FK to model_runs (kind-scoped runs have NULL
+        # industry); I-style to overrides (decisions carry industry_id).
+        ForeignKeyConstraint(
+            ["owner_id", "model_run_id"],
+            ["model_runs.owner_id", "model_runs.id"],
+        ),
+        ForeignKeyConstraint(
+            ["owner_id", "industry_id", "override_id"],
+            ["overrides.owner_id", "overrides.industry_id", "overrides.id"],
         ),
         Index("ix_processing_decisions_owner_parse", "owner_id", "parse_id"),
     )

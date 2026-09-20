@@ -21,7 +21,14 @@ Common-column rules implemented here:
 
 Exceptions (spec 03 §1): ``source_templates.id`` is a stable string derived
 from the normalized seed (declared on that table, not via UUIDPrimaryKey);
-``job_events`` uses PK (job_id, seq) — jobs tables arrive in a later task.
+``job_events`` uses PK (job_id, seq) with ``created_at`` only (models/jobs.py).
+
+Circular/forward FKs (``current_revision_id`` pointers, ``documents.current_
+capture_id``, ...) must NOT use ``use_alter=True``: CreateTable rendering
+silently drops use_alter constraints, so they would never reach the
+database. They are declared as regular constraints and created by
+``op.create_foreign_key`` at the end of the migration that introduces both
+tables (see migrations/versions/0002_knowledge_tables.py).
 """
 
 from __future__ import annotations
@@ -101,9 +108,8 @@ class VersionMixin:
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    # FK to jobs.id is added by the jobs migration (jobs tables are a later
-    # task); the column exists now so version tables match the spec's common
-    # column list.
+    # FK to jobs.id is declared per table (added by migration 0002: O tables
+    # reference jobs(owner_id, id), I tables jobs(owner_id, industry_id, id)).
     created_by_job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )

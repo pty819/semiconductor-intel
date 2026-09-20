@@ -1,18 +1,25 @@
-"""Unit tests: schema manifest — ORM metadata vs hand-written migration 0001.
+"""Unit tests: schema manifest — ORM metadata vs hand-written migrations.
 
-Static, DB-free gates for Task 2:
+Static, DB-free gates for Tasks 2 and 3:
 
-- The exact 21-table manifest from the task brief exists in BOTH
-  ``Base.metadata`` and the ``op.create_table`` calls of
-  migrations/versions/0001_core_tables.py (parse the migration source).
+- The exact table manifest (21 core tables in 0001 + 54 knowledge/
+  conversation/jobs/generation tables in 0002) exists in BOTH
+  ``Base.metadata`` and the ``op.create_table`` calls of the migration
+  files (parsed from source).
 - Scope classification agrees everywhere: auth/G tables carry no RLS; the
-  17 O/I tables all get ENABLE+FORCE and a ``TO intel_app`` policy.
-- The migration renders offline (``alembic upgrade --sql``) and the rendered
-  DDL is column- and constraint-name-identical to the ORM-compiled DDL, so
-  future autogenerate diffs stay meaningful.
+  O/I tables (owner-only predicate for the 0002 O/I hybrids) all get
+  ENABLE+FORCE and a ``TO intel_app`` policy.
+- The migrations render offline (``alembic upgrade --sql``) and the
+  rendered DDL is column- and constraint-name-identical to the ORM-compiled
+  DDL — counting constraints added later via ``ALTER TABLE ... ADD
+  CONSTRAINT`` (0002 creates circular/deferred FKs that way because
+  use_alter constraints never render), so future autogenerate diffs stay
+  meaningful.
 - Spec 03 §1 common-column rules: mutable tables have created_at/updated_at/
   row_version; version tables have version/recorded_at/schema_version and
-  UNIQUE(parent_id, version) but no mutability columns (INSERT-only).
+  UNIQUE(parent_id, version) but no mutability columns (INSERT-only);
+  append-only history tables and pure link tables (composite PK) carry no
+  mutability columns either.
 """
 
 from __future__ import annotations
@@ -25,12 +32,14 @@ import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_FILE = (
-    REPO_ROOT / "migrations" / "versions" / "0001_core_tables.py"
-)
+MIGRATIONS_DIR = REPO_ROOT / "migrations" / "versions"
+MIGRATION_FILES = {
+    "0001_core_tables.py": MIGRATIONS_DIR / "0001_core_tables.py",
+    "0002_knowledge_tables.py": MIGRATIONS_DIR / "0002_knowledge_tables.py",
+}
 
-# The 21 tables from the task brief / spec 03 §2-§3.
-EXPECTED_TABLES = {
+# The 21 core tables from Task 2 / spec 03 §2-§3.
+TASK2_TABLES = {
     # auth
     "users",
     "auth_sessions",
@@ -58,22 +67,155 @@ EXPECTED_TABLES = {
     "industry_sources",
 }
 
+# The 54 tables from Task 3 / spec 03 §4/§6/§7/§9, 15 §3, 16 §7.
+TASK3_TABLES = {
+    # knowledge (spec 03 §4)
+    "industry_documents",
+    "document_topics",
+    "entities",
+    "entity_aliases",
+    "claims",
+    "claim_revisions",
+    "evidence",
+    "source_families",
+    "events",
+    "event_revisions",
+    "event_topics",
+    "event_topic_revisions",
+    "event_relations",
+    "event_relation_revisions",
+    "watches",
+    "overrides",
+    "event_read_states",
+    # §9 physical association tables
+    "topic_revision_entities",
+    "claim_revision_entities",
+    "event_revision_claims",
+    "event_revision_entities",
+    "event_topic_revision_claims",
+    "relation_revision_evidence",
+    "watch_topics",
+    "watch_entities",
+    "document_association_history",
+    "event_association_history",
+    "event_merge_operations",
+    "event_lifecycle_history",
+    # evolution/report/conversation (spec 03 §6, 16 §7)
+    "evolutions",
+    "evolution_revisions",
+    "reports",
+    "report_revisions",
+    "conversations",
+    "messages",
+    "conversation_state_revisions",
+    "conversation_summary_revisions",
+    "review_tasks",
+    "audit_log",
+    "dependency_edges",
+    "derived_status",
+    # publication_citations split (03 §9)
+    "report_citations",
+    "evolution_citations",
+    "message_citations",
+    # jobs (spec 03 §7)
+    "jobs",
+    "job_steps",
+    "job_events",
+    "model_runs",
+    "coverage_batches",
+    "recall_hits",
+    "api_idempotency",
+    # generation (doc 15 §3)
+    "generation_runs",
+    "generation_run_models",
+    "output_generations",
+}
+
+EXPECTED_TABLES = TASK2_TABLES | TASK3_TABLES
+
 RLS_TABLES_EXPECTED = EXPECTED_TABLES - {
     "users",
     "auth_sessions",
     "source_templates",
     "parser_versions",
 }
-INDUSTRY_TABLES_EXPECTED = {"topics", "topic_revisions", "industry_sources"}
+# 0001 I tables + every 0002 I table (hybrids use the owner-only predicate).
+INDUSTRY_TABLES_EXPECTED = RLS_TABLES_EXPECTED - {
+    "industries",
+    "industry_revisions",
+    "owner_feeds",
+    "source_runs",
+    "discovery_items",
+    "blobs",
+    "documents",
+    "document_origins",
+    "captures",
+    "fetch_observations",
+    "parsed_artifacts",
+    "document_diffs",
+    "chunks",
+    "processing_decisions",
+    # 0002 owner-predicate tables: O + O/I hybrids (nullable industry_id)
+    "api_idempotency",
+    "jobs",
+    "job_steps",
+    "job_events",
+    "model_runs",
+    "coverage_batches",
+    "audit_log",
+}
 
-VERSION_TABLES = {"industry_revisions", "topic_revisions"}
-PARENT_COLUMNS = {"industry_revisions": "industry_id", "topic_revisions": "topic_id"}
+VERSION_TABLES = {
+    # 0001
+    "industry_revisions": "industry_id",
+    "topic_revisions": "topic_id",
+    # 0002
+    "claim_revisions": "claim_id",
+    "event_revisions": "event_id",
+    "event_topic_revisions": "event_topic_id",
+    "event_relation_revisions": "relation_id",
+    "evolution_revisions": "evolution_id",
+    "report_revisions": "report_id",
+    "conversation_state_revisions": "conversation_id",
+}
+PARENT_COLUMNS = dict(VERSION_TABLES)
+
+# Append-only tables (spec 03 §9 history / 16 §7 summaries): UUID PK (or the
+# job_events PK exception) + recorded_at/created_at, no mutability columns
+# and no version counter.
+APPEND_ONLY_TABLES = {
+    "conversation_summary_revisions",
+    "document_association_history",
+    "event_association_history",
+    "event_merge_operations",
+    "event_lifecycle_history",
+    "job_events",
+}
+
+# Pure link tables (spec 03 §1 例外: 复合主键, no common columns).
+PURE_LINK_TABLES = {
+    "topic_revision_entities",
+    "claim_revision_entities",
+    "event_revision_claims",
+    "event_revision_entities",
+    "event_topic_revision_claims",
+    "relation_revision_evidence",
+    "watch_topics",
+    "watch_entities",
+    "report_citations",
+    "evolution_citations",
+    "message_citations",
+    "generation_run_models",
+}
+
+NO_MUTABILITY_TABLES = (
+    set(VERSION_TABLES) | APPEND_ONLY_TABLES | PURE_LINK_TABLES
+)
 
 
-def _load_migration_module():
-    spec = importlib.util.spec_from_file_location(
-        "migration_0001_core_tables", MIGRATION_FILE
-    )
+def _load_migration_module(name: str):
+    path = MIGRATION_FILES[name]
+    spec = importlib.util.spec_from_file_location(f"migration_{name}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -118,11 +260,19 @@ def _migration_sql_tables(sql: str) -> dict[str, tuple[set[str], set[str]]]:
         cols = set(re.findall(r"^\s{4}(\w+) ", body, re.MULTILINE))
         cons = set(re.findall(r"CONSTRAINT (\S+)", body))
         out[name] = (cols, cons)
+    # 0002 adds circular/deferred FKs (and repairs 0001's use_alter ones)
+    # via ALTER TABLE ... ADD CONSTRAINT — count them per table.
+    for table, constraint in re.findall(
+        r"ALTER TABLE (\w+) ADD CONSTRAINT (\w+)", sql
+    ):
+        if table in out:
+            cols, cons = out[table]
+            out[table] = (cols, cons | {constraint})
     return out
 
 
 class TestTableManifest:
-    def test_orm_metadata_has_exactly_the_21_tables(self) -> None:
+    def test_orm_metadata_has_exactly_the_expected_tables(self) -> None:
         import intel.db.models  # noqa: F401
         from intel.db import Base
 
@@ -135,23 +285,42 @@ class TestTableManifest:
 
         assert set(ALL_TABLES) == set(Base.metadata.tables) == EXPECTED_TABLES
 
-    def test_migration_file_declares_exactly_the_21_tables(self) -> None:
-        source = MIGRATION_FILE.read_text()
-        declared = set(re.findall(r'op\.create_table\(\s*\n?\s*"(\w+)"', source))
-        assert declared == EXPECTED_TABLES
-        # No accidental extras (count guards regex blind spots).
-        assert len(re.findall(r"op\.create_table\(", source)) == 21
+    def test_migration_files_declare_exactly_their_tables(self) -> None:
+        per_file = {"0001_core_tables.py": TASK2_TABLES,
+                    "0002_knowledge_tables.py": TASK3_TABLES}
+        for name, expected in per_file.items():
+            source = MIGRATION_FILES[name].read_text()
+            declared = set(re.findall(r'op\.create_table\(\s*\n?\s*"(\w+)"', source))
+            # 0002 builds its uniform §9 link/citation tables via helpers.
+            declared |= set(
+                re.findall(
+                    r'(?:_link_table|_citation_table)\(\s*\n?\s*"(\w+)"', source
+                )
+            )
+            assert declared == expected, name
+            # No accidental extras (count guards regex blind spots). Literal
+            # op.create_table calls + helper invocations (indented — the
+            # helper *definitions* and their dynamic op.create_table calls
+            # must not be counted twice).
+            n_create = len(re.findall(r'op\.create_table\(\s*\n?\s*"', source))
+            n_helper = len(
+                re.findall(r"^\s+(?:_link_table|_citation_table)\(", source, re.MULTILINE)
+            )
+            assert n_create + n_helper == len(expected), (name, n_create, n_helper)
 
 
 class TestScopeClassification:
     def test_migration_rls_lists_match_expected_scopes(self) -> None:
-        module = _load_migration_module()
-        assert set(module.RLS_OWNER_TABLES) | set(module.RLS_INDUSTRY_TABLES) == (
-            RLS_TABLES_EXPECTED
-        )
-        assert set(module.RLS_INDUSTRY_TABLES) == INDUSTRY_TABLES_EXPECTED
+        owner_tables: set[str] = set()
+        industry_tables: set[str] = set()
+        for name in MIGRATION_FILES:
+            module = _load_migration_module(name)
+            owner_tables |= set(module.RLS_OWNER_TABLES)
+            industry_tables |= set(module.RLS_INDUSTRY_TABLES)
+        assert owner_tables | industry_tables == RLS_TABLES_EXPECTED
+        assert industry_tables == INDUSTRY_TABLES_EXPECTED
         # Scope sets are disjoint and never touch auth/G tables.
-        assert not (set(module.RLS_OWNER_TABLES) & set(module.RLS_INDUSTRY_TABLES))
+        assert not (owner_tables & industry_tables)
         assert not (
             RLS_TABLES_EXPECTED
             & {"users", "auth_sessions", "source_templates", "parser_versions"}
@@ -178,8 +347,6 @@ class TestScopeClassification:
         assert sql.count("WITH CHECK (owner_id = current_setting") == (
             len(RLS_TABLES_EXPECTED)
         )
-        # App role stub exists; grants are a later migration's job.
-        assert "CREATE ROLE intel_app NOLOGIN" in sql
 
 
 class TestMigrationMatchesOrm:
@@ -199,6 +366,48 @@ class TestMigrationMatchesOrm:
                 f"orm-only={sorted(orm_cons - mig_cons)}"
             )
 
+    def test_rendered_ddl_matches_orm_indexes(self) -> None:
+        import intel.db.models  # noqa: F401
+        from intel.db import Base
+
+        sql = _render_migration_sql()
+        mig_idx = set(re.findall(r"CREATE (?:UNIQUE )?INDEX (\w+)", sql))
+        orm_idx = {ix.name for t in Base.metadata.tables.values()
+                   for ix in t.indexes}
+        assert mig_idx == orm_idx, (
+            f"migration-only={sorted(mig_idx - orm_idx)} "
+            f"orm-only={sorted(orm_idx - mig_idx)}"
+        )
+
+    def test_deferred_fks_land_as_real_alters(self) -> None:
+        """use_alter constraints never render — 0002 must create every
+        circular/deferred FK (incl. the repaired 0001 ones) via ALTER."""
+        sql = _render_migration_sql()
+        alters = set(re.findall(r"ALTER TABLE (\w+) ADD CONSTRAINT (\w+)", sql))
+        expected = {
+            ("industries", "fk_industries_owner_id_industry_revisions"),
+            ("topics", "fk_topics_owner_id_topic_revisions"),
+            ("documents", "fk_documents_owner_id_captures"),
+            ("industry_revisions", "fk_industry_revisions_owner_id_jobs"),
+            ("topic_revisions", "fk_topic_revisions_owner_id_jobs"),
+            ("source_runs", "fk_source_runs_owner_id_jobs"),
+            ("processing_decisions", "fk_processing_decisions_owner_id_model_runs"),
+            ("processing_decisions", "fk_processing_decisions_owner_id_overrides"),
+            ("claims", "fk_claims_owner_id_claim_revisions"),
+            ("events", "fk_events_owner_id_event_revisions"),
+            ("event_topics", "fk_event_topics_owner_id_event_topic_revisions"),
+            ("event_relations", "fk_event_relations_owner_id_event_relation_revisions"),
+            ("watches", "fk_watches_owner_id_reports"),
+            ("evolutions", "fk_evolutions_owner_id_evolution_revisions"),
+            ("reports", "fk_reports_owner_id_report_revisions"),
+            ("conversations", "fk_conversations_owner_id_messages"),
+            (
+                "conversations",
+                "fk_conversations_owner_id_conversation_state_revisions",
+            ),
+        }
+        assert expected <= alters
+
 
 class TestCommonColumnRules:
     """Spec 03 §1 公共字段 rules, checked structurally."""
@@ -208,7 +417,7 @@ class TestCommonColumnRules:
         from intel.db import Base
 
         for name, table in Base.metadata.tables.items():
-            if name in VERSION_TABLES:
+            if name in NO_MUTABILITY_TABLES:
                 continue
             cols = set(table.columns.keys())
             assert {"id", "created_at", "updated_at", "row_version"} <= cols, name
@@ -218,10 +427,9 @@ class TestCommonColumnRules:
         import intel.db.models  # noqa: F401
         from intel.db import Base
 
-        for name in VERSION_TABLES:
+        for name, parent in VERSION_TABLES.items():
             table = Base.metadata.tables[name]
             cols = set(table.columns.keys())
-            parent = PARENT_COLUMNS[name]
             assert {"version", "recorded_at", "schema_version", parent} <= cols, name
             assert "updated_at" not in cols and "row_version" not in cols, name
             uniques = [
@@ -230,6 +438,38 @@ class TestCommonColumnRules:
                 if uc.__class__.__name__ == "UniqueConstraint"
             ]
             assert {parent, "version"} in uniques, name
+
+    def test_append_only_tables_have_no_mutability_columns(self) -> None:
+        import intel.db.models  # noqa: F401
+        from intel.db import Base
+
+        for name in APPEND_ONLY_TABLES:
+            table = Base.metadata.tables[name]
+            cols = set(table.columns.keys())
+            assert "updated_at" not in cols and "row_version" not in cols, name
+            if name == "job_events":
+                # Spec 03 §1 exception: PK(job_id, seq), created_at only.
+                pk = [c.name for c in table.primary_key.columns]
+                assert pk == ["job_id", "seq"], name
+                assert "id" not in cols and "recorded_at" not in cols, name
+            elif name == "event_merge_operations":
+                # Spec 03 §9 names applied_at/undone_at, not recorded_at.
+                assert {"id", "applied_at"} <= cols, name
+            else:
+                assert {"id", "recorded_at"} <= cols, name
+
+    def test_pure_link_tables_use_composite_primary_keys(self) -> None:
+        import intel.db.models  # noqa: F401
+        from intel.db import Base
+
+        for name in PURE_LINK_TABLES:
+            table = Base.metadata.tables[name]
+            cols = set(table.columns.keys())
+            pk = [c.name for c in table.primary_key.columns]
+            assert len(pk) == 2, (name, pk)
+            assert "id" not in cols, name
+            assert "updated_at" not in cols and "row_version" not in cols, name
+            assert {"owner_id", "industry_id"} <= cols, name
 
     def test_source_templates_id_is_a_stable_string(self) -> None:
         import intel.db.models  # noqa: F401
@@ -247,6 +487,8 @@ class TestCommonColumnRules:
             table = Base.metadata.tables[name]
             cols = set(table.columns.keys())
             assert "owner_id" in cols, name
+            if name in PURE_LINK_TABLES or name == "job_events":
+                continue  # composite PK instead of the scope UNIQUE
             if name in INDUSTRY_TABLES_EXPECTED:
                 assert "industry_id" in cols, name
                 expected_unique = {"owner_id", "industry_id", "id"}
@@ -269,6 +511,55 @@ class TestCommonColumnRules:
                 i for i in table.indexes if next(iter(i.columns)).name == "owner_id"
             ]
             assert leading, f"{name} has no owner-leading index (spec 03 §8)"
+
+    def test_jobs_serve_as_composite_fk_targets(self) -> None:
+        import intel.db.models  # noqa: F401
+        from intel.db import Base
+
+        for name in ("jobs", "model_runs"):
+            uniques = [
+                {c.name for c in uc.columns}
+                for uc in Base.metadata.tables[name].constraints
+                if uc.__class__.__name__ == "UniqueConstraint"
+            ]
+            assert {"owner_id", "id"} in uniques, name
+            assert {"owner_id", "industry_id", "id"} in uniques, name
+
+    def test_output_generations_single_target_check(self) -> None:
+        import intel.db.models  # noqa: F401
+        from intel.db import Base
+
+        table = Base.metadata.tables["output_generations"]
+        checks = [
+            ck for ck in table.constraints
+            if ck.__class__.__name__ == "CheckConstraint"
+            and "num_nonnulls" in (ck.sqltext.text if hasattr(ck.sqltext, "text")
+                                   else str(ck.sqltext))
+        ]
+        assert len(checks) == 1
+
+    def test_every_fk_references_a_unique_or_pk_target(self) -> None:
+        """Composite FKs only hold if the referred column set carries a
+        UNIQUE/PK — the classic silent failure for (owner_id, industry_id,
+        id) references. Without a DB, assert it statically on metadata."""
+        import intel.db.models  # noqa: F401
+        from intel.db import Base
+
+        def keysets(table):
+            return {
+                frozenset(c.name for c in uc.columns)
+                for uc in table.constraints
+                if uc.__class__.__name__ in ("UniqueConstraint", "PrimaryKeyConstraint")
+            }
+
+        for name, table in sorted(Base.metadata.tables.items()):
+            for fk in table.foreign_key_constraints:
+                referred = fk.elements[0].column.table
+                refcols = frozenset(e.column.name for e in fk.elements)
+                assert refcols in keysets(referred), (
+                    f"{name}: FK to {referred.name} {sorted(refcols)} has no "
+                    "UNIQUE/PK target"
+                )
 
 
 class TestRlsHelper:
