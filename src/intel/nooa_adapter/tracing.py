@@ -15,30 +15,34 @@ linkage (generation_run_models, output_generations.role).
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import bindparam
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from intel.db.models.generation import GenerationRun, GenerationRunModel
 from intel.db.models.jobs import ModelRun
-from intel.db.rls import set_scope
+from intel.db.rls import set_app_role, set_scope
 from intel.repositories.base import IndustryScope
 
 __all__ = [
     "GenerationRunRecord",
     "ModelRunRecord",
+    "SqlUsageSink",
     "job_trace_session",
     "link_generation_run_models",
     "record_generation_run",
     "record_model_run",
 ]
+
+_log = logging.getLogger("intel.tracing")
 
 
 @contextmanager
@@ -58,6 +62,49 @@ def job_trace_session(job_id: UUID, trace_dir: str | Path):
 
 def trace_session_id_for(job_id: UUID) -> str:
     return f"job-{job_id}"
+
+
+class SqlUsageSink:
+    """Production UsageSink (MW-01c): one model_runs row per LLM call.
+
+    The middleware hands over the job's ScopeContext and the response
+    usage; per-record state beyond that (route alias, prompt version) is
+    not visible at the seam, so the row records the seam's truth —
+    step_key ``llm_call``, the job's trace session ref, and the usage
+    payload (missing usage stays NULL, never 0). A failed write logs and
+    continues: observability must not fail a finished LLM call.
+    """
+
+    def __init__(self, engine: AsyncEngine) -> None:
+        self.engine = engine
+
+    async def record(self, scope: Any, usage: dict[str, Any] | None) -> None:
+        record = ModelRunRecord(
+            job_id=scope.job_id,
+            step_key="llm_call",
+            model_route="unknown",
+            prompt_version="",
+            settings_hash="",
+            input_manifest={"source": "middleware.llm_call"},
+            result_status="ok",
+            nooa_session_ref=trace_session_id_for(scope.job_id),
+            usage=dict(usage) if usage is not None else None,
+            industry_id=getattr(scope, "industry_id", None),
+            started_at=datetime.now(UTC),
+            finished_at=datetime.now(UTC),
+        )
+        try:
+            async with self.engine.connect() as conn, conn.begin():
+                await set_app_role(conn)
+                await record_model_run(
+                    conn,
+                    IndustryScope(scope.owner_id, getattr(scope, "industry_id", None)),
+                    record,
+                )
+        except Exception:  # noqa: BLE001 — tracing must not fail the call
+            _log.warning(
+                "model_runs write failed for job %s", scope.job_id, exc_info=True
+            )
 
 
 @dataclass(slots=True)

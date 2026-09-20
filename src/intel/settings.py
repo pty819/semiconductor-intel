@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # -- infrastructure ----------------------------------------------------
     database_url: str = "postgresql+asyncpg://intel:intel@localhost:5432/intel"
     object_store_root: Path = Path("var/objects")
+    # Per-job JSONL trace files land here as job-{job_id}.jsonl (doc 06 §7
+    # / 15 §2); the exporter is reconfigured once per job session.
+    job_trace_dir: Path = Path("var/traces")
     # Secret used to derive session cookie signatures. Dev default only;
     # production injects a real pepper via INTEL_SESSION_PEPPER.
     session_pepper: str = "dev-only-session-pepper-change-me"

@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from intel.nooa_adapter.agents import route_client
 from intel.nooa_adapter.factory import (
+    install_investigation_summarizer,
     load_route_registry,
     make_answer_agent,
     make_bare_investigation_agent,
@@ -24,6 +27,7 @@ from intel.nooa_adapter.factory import (
     prepare_job_agent,
 )
 from intel.nooa_adapter.middleware import InMemoryUsageSink
+from intel.nooa_adapter.tracing import SqlUsageSink, job_trace_session
 from intel.parsing import Parser, QualityThresholds
 from intel.repositories.base import IndustryScope
 from intel.repositories.search import SqlAlchemySearchRepository
@@ -139,26 +143,43 @@ def _wrap_per_job(
     make_handler: Callable[..., JobHandler],
     wiring_factory: Callable[..., object],
     settings: Settings,
-    sink: InMemoryUsageSink,
+    sink: InMemoryUsageSink | SqlUsageSink,
+    trace_dir: Path,
     planner_factory: Callable | None = None,
+    summarizer_tier: str | None = None,
 ) -> JobHandler:
     """Build a fresh agent (middleware budget is per-job) then run the handler.
 
-    ``planner_factory`` (answer/investigate) builds the per-job
-    QueryPlanner agent with the same middleware treatment; its wiring
-    factory then receives ``(agent, planner)``.
+    Every job runs inside :func:`job_trace_session` (JSONL under
+    ``trace_dir``, flushed when the session closes — I-5/TRACE-01) with
+    usage flowing to the SQL sink (model_runs rows). ``planner_factory``
+    (answer/investigate) builds the per-job QueryPlanner agent with the
+    same middleware treatment; its wiring factory then receives
+    ``(agent, planner)``. ``summarizer_tier`` (investigation) installs
+    the TokenBudgetSummarizer on the agent's route client and drains it
+    in ``finally`` when the job settles (16 §4).
     """
 
     async def handler(ctx: RunContext) -> None:
-        agent = agent_factory()
-        _prepare(agent, ctx, settings, sink)
-        if planner_factory is None:
-            inner = make_handler(wiring_factory(agent))
-        else:
-            planner = planner_factory()
-            _prepare(planner, ctx, settings, sink)
-            inner = make_handler(wiring_factory(agent, planner))
-        await inner(ctx)
+        with job_trace_session(ctx.job.id, trace_dir):
+            agent = agent_factory()
+            _prepare(agent, ctx, settings, sink)
+            summarizer = None
+            if summarizer_tier is not None:
+                summarizer = install_investigation_summarizer(
+                    agent, route_client(agent, summarizer_tier)
+                )
+            try:
+                if planner_factory is None:
+                    inner = make_handler(wiring_factory(agent))
+                else:
+                    planner = planner_factory()
+                    _prepare(planner, ctx, settings, sink)
+                    inner = make_handler(wiring_factory(agent, planner))
+                await inner(ctx)
+            finally:
+                if summarizer is not None:
+                    await summarizer.aclose()
 
     return handler
 
@@ -178,7 +199,11 @@ def build_runtime(
     service = JobService()
     open_jobs = sql_jobs_opener(engine)
     runner = JobRunner(service, open_jobs)
-    sink = InMemoryUsageSink()
+    # I-5/TRACE-06: every LLM call persists a model_runs row; the write
+    # is best-effort (a tracing failure must not fail a finished call).
+    sink = SqlUsageSink(engine)
+    trace_dir = Path(settings.job_trace_dir)
+    trace_dir.mkdir(parents=True, exist_ok=True)
     object_store = FileObjectStore(settings.object_store_root)
     settings.object_store_root.mkdir(parents=True, exist_ok=True)
     guard = UrlGuard()
@@ -233,6 +258,7 @@ def build_runtime(
                 ),
                 settings=settings,
                 sink=sink,
+                trace_dir=trace_dir,
             ),
         )
 
@@ -248,6 +274,7 @@ def build_runtime(
                 ),
                 settings=settings,
                 sink=sink,
+                trace_dir=trace_dir,
             ),
         )
 
@@ -263,6 +290,7 @@ def build_runtime(
                 ),
                 settings=settings,
                 sink=sink,
+                trace_dir=trace_dir,
             ),
         )
 
@@ -292,6 +320,7 @@ def build_runtime(
                 ),
                 settings=settings,
                 sink=sink,
+                trace_dir=trace_dir,
                 planner_factory=make_query_planner_agent,
             ),
         )
@@ -371,7 +400,11 @@ def build_runtime(
                 ),
                 settings=settings,
                 sink=sink,
+                trace_dir=trace_dir,
                 planner_factory=make_query_planner_agent,
+                # 16 §4: context-budget summarizer on the investigation
+                # agent's L3 route client; drained in finally.
+                summarizer_tier="L3",
             ),
         )
 
@@ -389,6 +422,7 @@ def build_runtime(
                 ),
                 settings=settings,
                 sink=sink,
+                trace_dir=trace_dir,
             ),
         )
 
