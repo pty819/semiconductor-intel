@@ -75,7 +75,9 @@ class SqlAlchemyRouteStore:
         self.scope = scope
         self.jobs = SqlAlchemyJobsStore(conn, scope)
 
-    async def get_blocks(self, parse_id: UUID) -> list[str] | None:
+    async def get_blocks(self, parse_id: UUID) -> list[SourceBlock] | None:
+        """Id-bearing blocks: the route digest renders ``[block_id] text``
+        so model citations can name real block ids (verified downstream)."""
         await bind_app(self.conn, self.scope)
         row = (
             await self.conn.execute(
@@ -87,7 +89,7 @@ class SqlAlchemyRouteStore:
         ).scalar_one_or_none()
         if row is None:
             return None
-        return [block.text for block in _source_blocks(list(row.blocks or []))]
+        return _source_blocks(list(row.blocks or []))
 
     async def active_industries(self, owner_id: UUID) -> Sequence[dict]:
         await bind_app(self.conn, IndustryScope(owner_id))
@@ -124,6 +126,30 @@ class SqlAlchemyRouteStore:
             )
         return out
 
+    async def active_topics(self, industry_id: UUID) -> Sequence[dict]:
+        from intel.db.models.workspace import Topic, TopicRevision
+
+        await bind_app(self.conn, IndustryScope(self.scope.owner_id, industry_id))
+        rows = (
+            await self.conn.execute(
+                select(Topic, TopicRevision)
+                .outerjoin(TopicRevision, Topic.current_revision_id == TopicRevision.id)
+                .where(
+                    Topic.owner_id == self.scope.owner_id,
+                    Topic.industry_id == industry_id,
+                    Topic.status == "active",
+                )
+            )
+        ).all()
+        return [
+            {
+                "topic_id": str(topic.id),
+                "name": topic.name,
+                "description": (revision.description if revision else ""),
+            }
+            for topic, revision in rows
+        ]
+
     async def insert_processing_decision(
         self,
         scope: IndustryScope,
@@ -133,6 +159,7 @@ class SqlAlchemyRouteStore:
         reasons: list[str],
         block_references: list[dict],
         input_manifest: dict,
+        topic_verdicts: list[dict] | None = None,
     ) -> UUID:
         await bind_app(self.conn, scope)
         industry_id = scope.require_industry_id()
@@ -176,6 +203,7 @@ class SqlAlchemyRouteStore:
                     "block_references": block_references,
                     "input_manifest": input_manifest,
                     "raw_outcome": outcome,
+                    "topic_verdicts": list(topic_verdicts or []),
                 },
             )
         )

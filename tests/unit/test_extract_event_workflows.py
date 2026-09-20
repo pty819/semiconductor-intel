@@ -61,11 +61,31 @@ class Verdict:
     block_references: list = field(default_factory=list)
 
 
+@dataclass
+class _TopicVerdict:
+    topic_id: str
+    relevant: bool
+    reason: str = ""
+
+
+@dataclass
+class _TopicsVerdict:
+    verdicts: list[_TopicVerdict] = field(default_factory=list)
+
+
 class FakeRoutingAgent:
-    def __init__(self, per_industry: dict[UUID, Verdict]) -> None:
+    def __init__(
+        self,
+        per_industry: dict[UUID, Verdict],
+        topics_verdict: _TopicsVerdict | None = None,
+    ) -> None:
         self.per_industry = per_industry
+        self.topics_verdict = topics_verdict
+        self.described_blocks: list[str] | None = None
+        self.judged_topics: list[str] | None = None
 
     async def describe_document(self, blocks: list[str]) -> Digest:
+        self.described_blocks = list(blocks)
         return Digest()
 
     async def judge_industry(self, digest: Digest, profile: str) -> Verdict:
@@ -75,26 +95,42 @@ class FakeRoutingAgent:
                 return verdict
         return Verdict("unrelated")
 
+    async def judge_topics(self, digest: Digest, topics: list[str]):
+        self.judged_topics = list(topics)
+        return self.topics_verdict or _TopicsVerdict()
+
 
 @dataclass
 class RouteStoreDouble:
     jobs_db: InMemoryJobsDatabase
-    blocks: dict[UUID, list[str]]
+    blocks: dict[UUID, list[SourceBlock]]
     industries: list[dict]
     decisions: list[dict] = field(default_factory=list)
+    topics: dict[UUID, list[dict]] = field(default_factory=dict)
 
     @property
     def jobs(self):
         return InMemoryJobsStore(self.jobs_db)
 
-    async def get_blocks(self, parse_id: UUID) -> list[str] | None:
+    async def get_blocks(self, parse_id: UUID) -> list[SourceBlock] | None:
         return self.blocks.get(parse_id)
 
     async def active_industries(self, owner_id: UUID) -> list[dict]:
         return self.industries
 
+    async def active_topics(self, industry_id: UUID) -> list[dict]:
+        return self.topics.get(industry_id, [])
+
     async def insert_processing_decision(
-        self, scope, *, parse_id, outcome, reasons, block_references, input_manifest
+        self,
+        scope,
+        *,
+        parse_id,
+        outcome,
+        reasons,
+        block_references,
+        input_manifest,
+        topic_verdicts=None,
     ) -> UUID:
         decision_id = uuid4()
         self.decisions.append(
@@ -104,6 +140,9 @@ class RouteStoreDouble:
                 "parse_id": parse_id,
                 "outcome": outcome,
                 "reasons": reasons,
+                "block_references": block_references,
+                "input_manifest": input_manifest,
+                "topic_verdicts": topic_verdicts,
             }
         )
         return decision_id
@@ -145,7 +184,7 @@ class TestRouteHandler:
         parse_id = uuid4()
         store = RouteStoreDouble(
             jobs_db=InMemoryJobsDatabase(),
-            blocks={parse_id: ["块文本"]},
+            blocks={parse_id: [SourceBlock(block_id="b001", text="块文本")]},
             industries=[
                 {"industry_id": INDUSTRY_A, "profile": f"profile {INDUSTRY_A}"},
                 {"industry_id": INDUSTRY_B, "profile": f"profile {INDUSTRY_B}"},
@@ -177,6 +216,8 @@ class TestRouteHandler:
         # uncertain 进待判断入口: recorded, nothing spawned for it.
         spawned = store.jobs_db.jobs[UUID(result.progress["extract_jobs"][0])]
         assert UUID(spawned["input"]["industry_id"]) == INDUSTRY_A
+        # I-2: the digest step receives id-bearing block text.
+        assert agent.described_blocks == ["[b001] 块文本"]
 
     async def test_missing_parse_fails_with_class(self):
         store = RouteStoreDouble(
@@ -197,6 +238,139 @@ class TestRouteHandler:
         result = await runner.run_once()
         assert result is not None and result.state == "failed"
         assert result.error["code"] == "parse_missing"
+
+    async def test_block_references_verified_before_persist(self):
+        """I-2: only refs resolving to a real block id + exact substring
+        survive; fabricated ids and near-miss quotes are dropped and
+        annotated on the decision."""
+        parse_id = uuid4()
+        text = "官方公告：公司与台积电签署设备采购协议"
+        store = RouteStoreDouble(
+            jobs_db=InMemoryJobsDatabase(),
+            blocks={parse_id: [SourceBlock(block_id="b001", text=text)]},
+            industries=[{"industry_id": INDUSTRY_A, "profile": f"p {INDUSTRY_A}"}],
+        )
+
+        @dataclass
+        class _Ref:
+            block_id: str
+            quote: str
+
+        agent = FakeRoutingAgent(
+            {
+                INDUSTRY_A: Verdict(
+                    "direct",
+                    block_references=[
+                        _Ref("b001", "设备采购协议"),  # real block, exact substring
+                        _Ref("b999", "设备采购协议"),  # fabricated block id
+                        _Ref("b001", "不存在的引文"),  # real block, quote miss
+                    ],
+                )
+            }
+        )
+        wiring = self._wiring(store, agent)
+        runner, db, service = _runner(
+            "route", make_route_handler(wiring), wiring.open_store
+        )
+        await service.enqueue(
+            InMemoryJobsStore(db),
+            IndustryScope(OWNER),
+            kind="route",
+            payload={"parse_id": str(parse_id)},
+            idempotency_key=f"route:{parse_id}",
+        )
+        result = await runner.run_once()
+        assert result is not None and result.state == "succeeded"
+        decision = store.decisions[0]
+        assert decision["block_references"] == [
+            {"block_id": "b001", "quote": "设备采购协议"}
+        ]
+        dropped = decision["input_manifest"]["dropped_block_references"]
+        assert {d["reason"] for d in dropped} == {"block_missing", "quote_not_found"}
+
+    async def test_topics_judged_with_output_coverage(self):
+        """I-6: direct industries run judge_topics; every ACTIVE topic
+        gets a verdict or an explicit fallback; fabricated topic ids drop."""
+        parse_id = uuid4()
+        topic_a, topic_b = uuid4(), uuid4()
+        store = RouteStoreDouble(
+            jobs_db=InMemoryJobsDatabase(),
+            blocks={parse_id: [SourceBlock(block_id="b001", text="块文本")]},
+            industries=[{"industry_id": INDUSTRY_A, "profile": f"p {INDUSTRY_A}"}],
+            topics={
+                INDUSTRY_A: [
+                    {"topic_id": str(topic_a), "name": "光刻胶供应"},
+                    {"topic_id": str(topic_b), "name": "先进封装"},
+                ]
+            },
+        )
+        agent = FakeRoutingAgent(
+            {INDUSTRY_A: Verdict("direct")},
+            topics_verdict=_TopicsVerdict(
+                # topic_a judged; topic_b missing → fallback; ghost → dropped.
+                [
+                    _TopicVerdict(str(topic_a), True, "直接讨论"),
+                    _TopicVerdict(str(uuid4()), True, "幻觉主题"),
+                ]
+            ),
+        )
+        wiring = self._wiring(store, agent)
+        runner, db, service = _runner(
+            "route", make_route_handler(wiring), wiring.open_store
+        )
+        await service.enqueue(
+            InMemoryJobsStore(db),
+            IndustryScope(OWNER),
+            kind="route",
+            payload={"parse_id": str(parse_id)},
+            idempotency_key=f"route:{parse_id}",
+        )
+        result = await runner.run_once()
+        assert result is not None and result.state == "succeeded"
+        assert result.progress["topics_judged"] == 2
+        verdicts = {
+            v["topic_id"]: v for v in (store.decisions[0]["topic_verdicts"] or [])
+        }
+        assert set(verdicts) == {str(topic_a), str(topic_b)}
+        assert verdicts[str(topic_a)]["relevant"] is True
+        assert verdicts[str(topic_b)] == {
+            "topic_id": str(topic_b),
+            "relevant": False,
+            "reason": "fallback:no_verdict",
+        }
+
+    async def test_verdict_ceiling_raises_instead_of_truncating(self):
+        """I-6: no silent [:max] — over the ceiling the job fails loudly
+        and industries_judged never over-reports."""
+        parse_id = uuid4()
+        many = [{"industry_id": str(uuid4()), "profile": f"p{i}"} for i in range(3)]
+        store = RouteStoreDouble(
+            jobs_db=InMemoryJobsDatabase(),
+            blocks={parse_id: [SourceBlock(block_id="b001", text="块文本")]},
+            industries=many,
+        )
+
+        @asynccontextmanager
+        async def open(scope):
+            yield store
+
+        wiring = RouteWiring(
+            open_store=open, agent=FakeRoutingAgent({}), max_verdicts_per_doc=2
+        )
+        runner, db, service = _runner(
+            "route", make_route_handler(wiring), wiring.open_store
+        )
+        await service.enqueue(
+            InMemoryJobsStore(db),
+            IndustryScope(OWNER),
+            kind="route",
+            payload={"parse_id": str(parse_id)},
+            idempotency_key=f"route:{parse_id}",
+        )
+        result = await runner.run_once()
+        assert result is not None and result.state == "failed"
+        assert result.error["code"] == "too_many_industries"
+        assert store.decisions == []
 
 
 BLOCKS = [

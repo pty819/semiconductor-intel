@@ -109,6 +109,12 @@ class FakeLLMRoutingAgent:
         response = await self.llm.acall([{"role": "user", "content": "judge"}])
         return RoutingVerdict.model_validate_json(response.content)
 
+    async def judge_topics(self, digest: DocumentDigest, topics: list[str]):
+        from intel.nooa_adapter.agents import TopicsVerdict
+
+        response = await self.llm.acall([{"role": "user", "content": "topics"}])
+        return TopicsVerdict.model_validate_json(response.content)
+
 
 class FakeLLMExtractAgent:
     """ExtractionAgentProtocol backed by FakeLLM scripted JSON."""
@@ -132,14 +138,25 @@ class RouteStoreDouble:
     def jobs(self):
         return InMemoryJobsStore(self.jobs_db)
 
-    async def get_blocks(self, parse_id: UUID) -> list[str] | None:
+    async def get_blocks(self, parse_id: UUID) -> list[SourceBlock] | None:
         return self.blocks.get(parse_id)
 
     async def active_industries(self, owner_id: UUID) -> list[dict]:
         return self.industries
 
+    async def active_topics(self, industry_id: UUID) -> list[dict]:
+        return []  # golden samples carry no topic set; step stays inert
+
     async def insert_processing_decision(
-        self, scope, *, parse_id, outcome, reasons, block_references, input_manifest
+        self,
+        scope,
+        *,
+        parse_id,
+        outcome,
+        reasons,
+        block_references,
+        input_manifest,
+        topic_verdicts=None,
     ) -> UUID:
         decision_id = uuid4()
         self.decisions.append(
@@ -149,6 +166,7 @@ class RouteStoreDouble:
                 "parse_id": parse_id,
                 "outcome": outcome,
                 "reasons": reasons,
+                "block_references": block_references,
             }
         )
         return decision_id
@@ -219,7 +237,7 @@ async def _run_sample(sample: dict[str, Any]) -> tuple[list[dict[str, Any]], int
     service = JobService(clock=_now, rng=random.Random(1))
     route_store = RouteStoreDouble(
         jobs_db=jobs_db,
-        blocks={parse_id: [block.text for block in source_blocks]},
+        blocks={parse_id: source_blocks},
         industries=[
             {
                 "industry_id": str(INDUSTRY_ID),
