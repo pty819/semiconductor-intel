@@ -119,6 +119,19 @@ class Principal:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionAuth:
+    """A validated session principal plus the stored CSRF hash.
+
+    ``validate_session_detail`` returns this so HTTP dependencies can check
+    the X-CSRF-Token header against ``csrf_hash`` (08 §1) without a second
+    storage round-trip and without ever materializing plaintext secrets.
+    """
+
+    principal: Principal
+    csrf_hash: str
+
+
+@dataclass(frozen=True, slots=True)
 class SessionTokens:
     """Freshly minted session secrets — plaintext, shown to the caller once."""
 
@@ -374,7 +387,20 @@ class IdentityService:
 
         Rejects unknown cookies, revoked sessions (注销吊销), expiry, disabled
         users, and sessions whose password_version no longer matches the
-        user's (stale after reset_password)."""
+        user's (stale after reset_password).
+        """
+        detail = await self.validate_session_detail(repo, cookie_value)
+        return None if detail is None else detail.principal
+
+    async def validate_session_detail(
+        self, repo: IdentityRepository, cookie_value: str
+    ) -> SessionAuth | None:
+        """``validate_session`` plus the stored CSRF hash for CSRF checks.
+
+        Same rejection rules; on success returns the session-bound principal
+        together with ``csrf_hash`` so ``hash_token(header) == csrf_hash``
+        (the 08 §1 check) can run in the API dependency layer.
+        """
         session = await repo.get_session_by_token_hash(
             self.hash_token(cookie_value)
         )
@@ -387,7 +413,10 @@ class IdentityService:
             return None
         if session.password_version != user.password_version:
             return None
-        return Principal(user_id=user.id, session_id=session.id)
+        return SessionAuth(
+            principal=Principal(user_id=user.id, session_id=session.id),
+            csrf_hash=session.csrf_hash,
+        )
 
     async def logout(self, repo: IdentityRepository, principal: Principal) -> None:
         """Revoke the principal's session; idempotent."""

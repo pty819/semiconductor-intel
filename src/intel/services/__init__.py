@@ -1,4 +1,4 @@
-"""Application services (identity now; ingestion/retrieval/knowledge later)."""
+"""Application services (identity + workspace/sources now; more later)."""
 
 from intel.services.identity import (
     IdentityRepository,
@@ -7,6 +7,7 @@ from intel.services.identity import (
     LoginRateLimited,
     LoginTaken,
     Principal,
+    SessionAuth,
     SessionRecord,
     SessionTokens,
     SqlAlchemyIdentityRepository,
@@ -22,6 +23,7 @@ __all__ = [
     "LoginRateLimited",
     "LoginTaken",
     "Principal",
+    "SessionAuth",
     "SessionRecord",
     "SessionTokens",
     "SqlAlchemyIdentityRepository",
