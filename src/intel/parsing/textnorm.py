@@ -16,6 +16,7 @@ import unicodedata
 from dataclasses import dataclass
 
 _WHITESPACE_RUN = re.compile(r"[ \t\f\v]+")
+_ANY_WHITESPACE = re.compile(r"\s+")
 
 _CONTROL_TABLE = str.maketrans(
     "", "", "".join(chr(c) for c in range(32) if c not in (9, 10))
@@ -78,3 +79,17 @@ def collapse_whitespace(text: str, *, kind: str) -> str:
 def clean_block_text(text: str, *, kind: str) -> str:
     """Full pipeline for one block's text."""
     return collapse_whitespace(normalize_text(text), kind=kind)
+
+
+def canonical_document_text(texts: list[str]) -> str:
+    """Whole-document canonical text: NFC, block texts stripped and joined
+    with single spaces, all whitespace runs collapsed.
+
+    This is re-segmentation-proof: a parser upgrade that merges or splits
+    paragraphs (or re-flows whitespace) yields the SAME canonical string,
+    so whole-document equality — the PAR-01 "原文未变" test — does not
+    depend on where block boundaries fell. Block-level LCS detail still
+    shows the re-segmentation; it just cannot change the kind."""
+    pieces = [normalize_text(text).strip() for text in texts]
+    joined = " ".join(piece for piece in pieces if piece)
+    return _ANY_WHITESPACE.sub(" ", joined).strip()

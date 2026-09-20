@@ -686,6 +686,10 @@ def make_parse_handler(wiring: IngestWiring) -> JobHandler:
                     capture_id=capture_id,
                     media_type=capture.content_type,
                     raw=raw,
+                    # Same label scheme as rehydrated prior parses so
+                    # same-parser diffs compare equal versions and the
+                    # classifier's metadata-only branch is reachable.
+                    parser_version=_parser_label(parser_version_id),
                 )
             )
         except JobFailure:
@@ -801,14 +805,36 @@ async def _persist_diffs(
 
     for prior in candidates:
         prior_artifact = _artifact_from_record(prior)
+        current_artifact = _artifact_from_record(record)
+        # Direction is recency-based, not execution-order-based: with
+        # concurrent workers the OLDER capture's parse can run last, and
+        # from→to must still read old version → new version (consumers
+        # and field_changes direction depend on it).
+        prior_capture = await txn.pool.get_capture(prior.capture_id)
+        prior_key = (
+            prior_capture.fetched_at if prior_capture is not None else None,
+            prior.parsed_at,
+            prior.id,
+        )
+        current_key = (
+            capture.fetched_at if capture is not None else None,
+            record.parsed_at,
+            record.id,
+        )
+        if prior_key <= current_key:
+            from_artifact, to_artifact = prior_artifact, current_artifact
+            from_id, to_id = prior.id, record.id
+        else:
+            from_artifact, to_artifact = current_artifact, prior_artifact
+            from_id, to_id = record.id, prior.id
         result = diff_blocks(
-            prior_artifact, artifact, BLOCK_DIFF_ALGORITHM
+            from_artifact, to_artifact, BLOCK_DIFF_ALGORITHM
         )
         await txn.pool.insert_document_diff(
             DocumentDiffRecord(
                 owner_id=ctx.job.owner_id,
-                from_parse_id=prior.id,
-                to_parse_id=record.id,
+                from_parse_id=from_id,
+                to_parse_id=to_id,
                 diff_algorithm_version=result.algorithm_version,
                 kind=result.kind,
                 changed_blocks=list(result.changed_blocks),
@@ -817,13 +843,21 @@ async def _persist_diffs(
         )
 
 
+def _parser_label(parser_version_id: UUID) -> str:
+    """Stable comparison label for one parser_versions row. Used for BOTH
+    the freshly parsed artifact and rehydrated prior parses, so
+    same-parser diffs compare equal versions (PAR-01 classification
+    depends on version identity, not just text equality)."""
+    return f"parser:{parser_version_id}"
+
+
 def _artifact_from_record(record: ParsedArtifactRecord):
     """Rehydrate a comparison artifact from the stored row (parser label
     keyed by the parser_versions id — enough identity for diff
     classification)."""
     return ParsedArtifactDTO(
         capture_id=record.capture_id,
-        parser_version=f"parser:{record.parser_version_id}",
+        parser_version=_parser_label(record.parser_version_id),
         metadata=dict(record.artifact_metadata),
         blocks=[Block(**block) for block in record.blocks],
         coverage=dict(record.coverage),

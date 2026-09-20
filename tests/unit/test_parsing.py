@@ -519,12 +519,67 @@ def mk_artifact(
 
 def test_same_text_new_parser_is_parser_change_par01() -> None:
     old = mk_artifact(["alpha", "beta", "gamma"], parser_version="builtin@1")
-    # Parser upgrade re-splits blocks but the normalized text set is equal.
     new = mk_artifact(["alpha", "beta", "gamma"], parser_version="builtin@2")
     result = diff_blocks(old, new, BLOCK_DIFF_ALGORITHM)
     assert result.kind == "parser_change"
     assert result.changed_blocks == []
     assert result.field_changes == []
+
+
+def test_parser_upgrade_resegmentation_is_parser_change_par01() -> None:
+    # The SAME text re-segmented under a NEW parser version: paragraphs
+    # merged / split. Block hashes all change, but the whole-document
+    # normalized text is equal — PAR-01 forbids the spurious
+    # "新闻内容更新事件" this used to produce.
+    old = mk_artifact(
+        ["alpha beta", "gamma delta", "epsilon"], parser_version="builtin@1"
+    )
+    merged = mk_artifact(
+        ["alpha", "beta gamma", "delta epsilon"], parser_version="builtin@2"
+    )
+    result = diff_blocks(old, merged, BLOCK_DIFF_ALGORITHM)
+    assert result.kind == "parser_change"
+    assert result.field_changes == []
+    # Block-level detail is still recorded for inspection — it just
+    # cannot flip the kind.
+    assert result.changed_blocks  # re-segmentation shows in the detail
+
+    # And the reverse direction (split) behaves the same.
+    back = diff_blocks(merged, old, BLOCK_DIFF_ALGORITHM)
+    assert back.kind == "parser_change"
+
+
+def test_whitespace_reflow_is_not_content_change() -> None:
+    old = mk_artifact(["alpha  beta", "gamma"])
+    new = mk_artifact(["alpha beta", "gamma"])  # double space collapsed
+    assert diff_blocks(old, new, BLOCK_DIFF_ALGORITHM).kind == "parser_change"
+
+
+def test_same_parser_metadata_only_edit_is_content_change() -> None:
+    # Same parser, same document text, server edited the title: a real
+    # metadata change — NOT parser_change (which would suppress the
+    # event).
+    old = mk_artifact(["alpha", "beta"], metadata={"title": "T1"})
+    new = mk_artifact(["alpha", "beta"], metadata={"title": "T2"})
+    result = diff_blocks(old, new, BLOCK_DIFF_ALGORITHM)
+    assert result.kind == "content_change"
+    assert result.field_changes == [
+        {"field": "title", "from": "T1", "to": "T2"}
+    ]
+    assert result.changed_blocks == []
+
+    # But under a NEW parser version the same title delta stays
+    # parser_change: better metadata extraction is not an event (PAR-01).
+    upgraded = mk_artifact(
+        ["alpha", "beta"],
+        parser_version="builtin@2",
+        metadata={"title": "T2"},
+    )
+    again = diff_blocks(old, upgraded, BLOCK_DIFF_ALGORITHM)
+    assert again.kind == "parser_change"
+    assert again.field_changes == [
+        {"field": "title", "from": "T1", "to": "T2"}
+    ]
 
 
 def test_content_change_pairs_blocks_from_both_parses() -> None:
@@ -786,6 +841,39 @@ async def test_new_capture_content_change_diff_persisted() -> None:
     changed = [c for c in diff["changed_blocks"] if c["change"] == "changed"]
     assert len(changed) == 1
     assert changed[0]["from_block_id"] != changed[0]["to_block_id"]
+
+
+async def test_same_parser_title_only_edit_not_parser_change() -> None:
+    # Workflow path (fix round 1): the parse handler must thread the
+    # job's parser_version into the comparison label. Same parser, same
+    # body text, only the server-edited <title> changed → the diff is a
+    # metadata content change, NOT parser_change (which would suppress
+    # the event). Before the fix both sides carried different label
+    # schemes ("builtin@1" vs "parser:<uuid>") and could never compare
+    # equal, let alone reach the metadata-only branch.
+    harness = ParseHarness()
+    body = "<h1>Fab Report</h1><p>Stable body paragraph for the diff scenario.</p>"
+
+    def page(title: str) -> bytes:
+        return (
+            f"<html><head><title>{title}</title></head><body><main>"
+            f"{body}</main></body></html>"
+        ).encode()
+
+    _, capture1 = await seed_document_with_capture(harness, page("Fab v1"))
+    _, capture2 = await seed_document_with_capture(harness, page("Fab v2"))
+    await harness.enqueue_parse(capture1, PARSER_V1)
+    await harness.enqueue_parse(capture2, PARSER_V1)
+    await harness.drain()
+
+    diffs = list(harness.pool_db.diffs.values())
+    assert len(diffs) == 1
+    assert diffs[0]["kind"] != "parser_change"
+    assert diffs[0]["kind"] == "content_change"
+    assert diffs[0]["changed_blocks"] == []
+    assert diffs[0]["field_changes"] == [
+        {"field": "title", "from": "Fab v1", "to": "Fab v2"}
+    ]
 
 
 async def test_parse_job_is_idempotent_per_capture_and_parser() -> None:

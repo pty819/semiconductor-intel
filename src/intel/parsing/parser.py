@@ -33,7 +33,11 @@ from intel.parsing.quality import (
     detect_language,
     is_language_mixed,
 )
-from intel.parsing.textnorm import decode_bytes, normalize_text
+from intel.parsing.textnorm import (
+    canonical_document_text,
+    decode_bytes,
+    normalize_text,
+)
 
 _HTML_TYPES = {"text/html", "application/xhtml+xml"}
 #: media types where ~1.0 chars/byte is legitimate (no markup to strip).
@@ -186,5 +190,10 @@ def _charset_of(media_type: str | None) -> str | None:
 
 
 def _text_hash(blocks: list[dict]) -> str:
-    joined = "".join(normalize_text(block["text"]) for block in blocks)
-    return hashlib.sha256(joined.encode()).hexdigest()
+    """Whole-document normalized-text digest (same canonicalization the
+    diff's PAR-01 test uses, so stored text_hash == document hash)."""
+    return hashlib.sha256(
+        canonical_document_text(
+            [block["text"] for block in blocks]
+        ).encode()
+    ).hexdigest()
