@@ -63,11 +63,15 @@ RUN set -eux; \
     make -C /usr/local/src/pg_textsearch install; \
     \
     # ---- 3. pg_jieba 1.1.1 @ d0ffac8 (C++; cmake out-of-tree per its README,
-    #          `git submodule update --init --recursive` fetches cppjieba+dicts) ----
+    #          `git submodule update --init --recursive` fetches cppjieba+dicts.
+    #          PostgreSQL_TYPE_INCLUDE_DIR: CMake's FindPostgreSQL marks the
+    #          server-headers dir NOTFOUND under PGDG's PG18 layout unless
+    #          pointed at `pg_config --includedir-server` explicitly) ----
     git clone https://github.com/jaiminpan/pg_jieba.git /usr/local/src/pg_jieba; \
     git -C /usr/local/src/pg_jieba checkout d0ffac8028328b2566a889ff4db3d74ba63d1b42; \
     git -C /usr/local/src/pg_jieba submodule update --init --recursive; \
-    cmake -B /usr/local/src/pg_jieba/build -S /usr/local/src/pg_jieba; \
+    cmake -B /usr/local/src/pg_jieba/build -S /usr/local/src/pg_jieba \
+        -DPostgreSQL_TYPE_INCLUDE_DIR="$(pg_config --includedir-server)"; \
     cmake --build /usr/local/src/pg_jieba/build --parallel "$(nproc)"; \
     make -C /usr/local/src/pg_jieba/build install; \
     \
