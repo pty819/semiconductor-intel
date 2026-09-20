@@ -1,4 +1,4 @@
-"""Ingest workflow handlers: discover + fetch (spec 04 §2-§4, 07 §6).
+"""Ingest workflow handlers: discover + fetch + parse (spec 04 §2-§4, 07 §6).
 
 Registered on the :class:`~intel.workers.runner.JobRunner`:
 
@@ -12,7 +12,17 @@ Registered on the :class:`~intel.workers.runner.JobRunner`:
   fetch_observation — 304 and unchanged-200 bind the prior capture
   (ING-04). Scope/auth violations write an audit_log row in the same
   transaction as the failure evidence, then fail closed (07 §6 落点,
-  this task's first real anchor).
+  this task's first real anchor). A persisted capture spawns its parse
+  job in the same commit (04 §4).
+- ``parse``: read the capture blob back from the object store, run the
+  pure :class:`~intel.parsing.Parser` (no DB access, 14 §2), then one
+  commit transaction persisting the normalized blob + parsed_artifact
+  row (UNIQUE(capture, parser_version) keeps both parses of a capture),
+  document_diffs against earlier parses (PAR-01), the refined capture
+  retrieval_scope, and the follow-up index job. A parse that yields
+  parse_status=failed is still persisted evidence — the JOB succeeds
+  with the failure recorded in progress (PAR-03: 不强行生成全文分析,
+  and no retry loop on permanently broken content).
 
 Politeness (04 §2): per-domain semaphore (2) + 2s minimum interval;
 429 honors Retry-After through the existing transient classification.
@@ -20,6 +30,7 @@ Politeness (04 §2): per-domain semaphore (2) + 2s minimum interval;
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
@@ -32,6 +43,17 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from intel.domain.urlnorm import normalize_url
+from intel.parsing import (
+    BLOCK_DIFF_ALGORITHM,
+    BUILTIN_PARSER_VERSION_ID,
+    Block,
+    Parser,
+    ParserInput,
+    diff_blocks,
+)
+from intel.parsing import (
+    ParsedArtifact as ParsedArtifactDTO,
+)
 from intel.repositories.audit import AuditWriter, SqlAlchemyAuditWriter
 from intel.repositories.base import IndustryScope
 from intel.repositories.jobs import JobsStore, SqlAlchemyJobsStore
@@ -39,8 +61,10 @@ from intel.repositories.pool import (
     BlobRecord,
     CaptureRecord,
     DiscoveryItemRecord,
+    DocumentDiffRecord,
     DocumentRecord,
     FetchObservationRecord,
+    ParsedArtifactRecord,
     PoolRepository,
     SourceRunRecord,
     SqlAlchemyPoolRepository,
@@ -87,13 +111,15 @@ class FetcherProtocol(Protocol):
 
 @dataclass(slots=True)
 class IngestWiring:
-    """Everything the two handlers need, injected by the composition root."""
+    """Everything the handlers need, injected by the composition root."""
 
     open_ingest: OpenIngestTxn
     page_client_factory: Callable[[], PageClient]
     fetcher_factory: Callable[[], FetcherProtocol]
     object_store: ObjectStore
     politeness: PolitenessGate
+    #: The pure parser (no DB access); override for parser tests.
+    parser: Parser = field(default_factory=Parser)
     #: Per-fetch budget; the job deadline caps it further.
     fetch_timeout_seconds: float = 120.0
     max_bytes: int = 10_000_000
@@ -101,12 +127,14 @@ class IngestWiring:
 
 
 def register_ingest_handlers(runner, wiring: IngestWiring) -> None:
-    """Attach discover/fetch handlers; ``source_poll`` maps to discover
-    (Task 6 ruling: the API's poll endpoint enqueues source_poll today)."""
+    """Attach discover/fetch/parse handlers; ``source_poll`` maps to
+    discover (Task 6 ruling: the API's poll endpoint enqueues
+    source_poll today)."""
     discover = make_discover_handler(wiring)
     runner.register("discover", discover)
     runner.register("source_poll", discover)
     runner.register("fetch", make_fetch_handler(wiring))
+    runner.register("parse", make_parse_handler(wiring))
 
 
 def sql_ingest_txn_factory(
@@ -376,6 +404,8 @@ def _failure_for(result: CaptureResult) -> JobFailure | None:
 
 
 def make_fetch_handler(wiring: IngestWiring) -> JobHandler:
+    jobs_service = JobService(clock=wiring.clock)
+
     async def handler(ctx: RunContext) -> None:
         await ctx.boundary()
         payload = ctx.job.input
@@ -438,7 +468,9 @@ def make_fetch_handler(wiring: IngestWiring) -> JobHandler:
             raise JobFailure("scope_violation", str(exc)) from exc
 
         async with wiring.open_ingest(ctx.scope) as txn:
-            await _persist_capture(txn, ctx, item, prior, result, visibility)
+            await _persist_capture(
+                txn, ctx, item, prior, result, visibility, jobs_service
+            )
         failure = _failure_for(result)
         if failure is not None:
             raise failure
@@ -457,6 +489,7 @@ async def _persist_capture(
     prior: CaptureRecord | None,
     result: CaptureResult,
     visibility: str,
+    jobs_service: JobService | None = None,
 ) -> None:
     """One commit transaction for one fetch outcome (ING-04 included)."""
     etag = result.headers.get("etag")
@@ -571,3 +604,230 @@ async def _persist_capture(
     observation.capture_id = capture.id
     await txn.pool.insert_observation(observation)
     await txn.pool.set_discovery_state(item.id, "captured")
+    if jobs_service is not None:
+        # Same commit spawns the capture's parse job (04 §4): the parser
+        # version is the feed's pinned one when known, else the built-in
+        # release (whose parser_versions row the release process seeds).
+        parser_version_id = BUILTIN_PARSER_VERSION_ID
+        if item.feed_id is not None:
+            feed = await txn.pool.load_feed_state(item.feed_id)
+            if feed is not None and feed.parser_version_id is not None:
+                parser_version_id = feed.parser_version_id
+        await jobs_service.enqueue(
+            txn.jobs,
+            ctx.scope,
+            kind="parse",
+            payload={
+                "capture_id": str(capture.id),
+                "parser_version_id": str(parser_version_id),
+            },
+            idempotency_key=build_idempotency_key(
+                "parse",
+                {
+                    "owner": str(ctx.job.owner_id),
+                    "capture": str(capture.id),
+                    "parser_version": str(parser_version_id),
+                },
+            ),
+        )
+
+
+# --------------------------------------------------------------------------
+# parse
+# --------------------------------------------------------------------------
+
+#: Placeholder versions for the index job's idempotency key; Task 10
+#: owns the chunker/embedding handlers and replaces these constants.
+INDEX_CHUNKER_VERSION = "chunker@1"
+INDEX_EMBEDDING_VERSION = "embed@1"
+
+#: Soft cap on flags echoed into job progress (observability only).
+_MAX_PROGRESS_FLAGS = 20
+
+
+def make_parse_handler(wiring: IngestWiring) -> JobHandler:
+    """``parse`` kind: blob → pure parser → one commit transaction.
+
+    The parser itself never touches the DB (14 §2); every persist lands
+    in a single transaction: normalized blob, parsed_artifacts row,
+    document_diffs, the capture's refined retrieval_scope and the index
+    job. A parse_status=failed artifact is persisted evidence and the
+    job still succeeds — only genuine execution errors raise
+    ``parser_error`` for the one allowed retry (07 §6)."""
+
+    async def handler(ctx: RunContext) -> None:
+        await ctx.boundary()
+        payload = ctx.job.input
+        capture_id = UUID(str(payload["capture_id"]))
+        parser_version_id = UUID(
+            str(payload.get("parser_version_id", BUILTIN_PARSER_VERSION_ID))
+        )
+
+        async with wiring.open_ingest(ctx.scope) as txn:
+            capture = await txn.pool.get_capture(capture_id)
+        if capture is None:
+            raise JobFailure("capture_missing", f"capture {capture_id} gone")
+        async with wiring.open_ingest(ctx.scope) as txn:
+            blob = await txn.pool.get_blob(capture.raw_blob_id)
+        if blob is None:
+            raise JobFailure("blob_missing", f"blob for capture {capture_id}")
+
+        try:
+            raw = wiring.object_store.read(blob.object_key)
+        except Exception as exc:
+            raise JobFailure("blob_unreadable", str(exc)) from exc
+
+        # Pure CPU work: no transaction held across the parse. A genuine
+        # parser crash is the retryable parser_error class (07 §6: 同版本
+        # 最多重试1次); failed *outcomes* (login page, garbage) are data.
+        try:
+            artifact = wiring.parser.parse(
+                ParserInput(
+                    capture_id=capture_id,
+                    media_type=capture.content_type,
+                    raw=raw,
+                )
+            )
+        except JobFailure:
+            raise
+        except Exception as exc:
+            raise JobFailure("parser_error", repr(exc)) from exc
+        await ctx.boundary()
+
+        normalized = artifact.model_dump_json().encode()
+        digest = hashlib.sha256(normalized).hexdigest()
+        jobs_service = JobService(clock=wiring.clock)
+        async with wiring.open_ingest(ctx.scope) as txn:
+            if txn.object_store is None:  # pragma: no cover
+                raise RuntimeError("IngestTxn has no object store attached")
+            norm_blob = await txn.pool.find_blob(digest, "application/json")
+            if norm_blob is None:
+                object_key = txn.object_store.write(
+                    normalized, media_type="application/json"
+                )
+                norm_blob = await txn.pool.insert_blob(
+                    BlobRecord(
+                        owner_id=ctx.job.owner_id,
+                        object_key=object_key,
+                        sha256=digest,
+                        media_type="application/json",
+                        byte_size=len(normalized),
+                        retention_class="parsed",
+                    )
+                )
+            record, created = await txn.pool.insert_parsed_artifact(
+                ParsedArtifactRecord(
+                    owner_id=ctx.job.owner_id,
+                    capture_id=capture_id,
+                    parser_version_id=parser_version_id,
+                    normalized_blob_id=norm_blob.id,
+                    text_hash=artifact.text_hash,
+                    blocks=[block.model_dump() for block in artifact.blocks],
+                    artifact_metadata=dict(artifact.metadata),
+                    parse_status=artifact.parse_status,
+                    coverage=dict(artifact.coverage),
+                    quality_flags=list(artifact.quality_flags),
+                )
+            )
+            if created:
+                await _persist_diffs(txn, ctx, capture_id, record, artifact)
+                if artifact.parse_status in ("ok", "partial"):
+                    # Task 10 owns the index handler; until it registers,
+                    # the runner's default handler marks these succeeded
+                    # with a note (Task 6 convention — observable queue).
+                    await jobs_service.enqueue(
+                        txn.jobs,
+                        ctx.scope,
+                        kind="index",
+                        payload={
+                            "parse_id": str(record.id),
+                            "chunker_version": INDEX_CHUNKER_VERSION,
+                            "embedding_version": INDEX_EMBEDDING_VERSION,
+                        },
+                        idempotency_key=build_idempotency_key(
+                            "index",
+                            {
+                                "owner": str(ctx.job.owner_id),
+                                "parse": str(record.id),
+                                "chunker_version": INDEX_CHUNKER_VERSION,
+                                "embedding_version": INDEX_EMBEDDING_VERSION,
+                            },
+                        ),
+                    )
+            await txn.pool.set_capture_retrieval_scope(
+                capture_id, artifact.retrieval_scope
+            )
+
+        await _finish(
+            ctx,
+            progress={
+                "parse_id": str(record.id),
+                "parse_status": artifact.parse_status,
+                "retrieval_scope": artifact.retrieval_scope,
+                "blocks": len(artifact.blocks),
+                "quality_flags": artifact.quality_flags[:_MAX_PROGRESS_FLAGS],
+            },
+        )
+
+    return handler
+
+
+async def _persist_diffs(
+    txn: IngestTxn,
+    ctx: RunContext,
+    capture_id: UUID,
+    record: ParsedArtifactRecord,
+    artifact,
+) -> None:
+    """Diff the new parse against earlier parses and persist rows under
+    UNIQUE(from, to, algorithm). Failed parses never pair — a login page
+    must not mint a "content removed" event."""
+    if artifact.parse_status == "failed":
+        return
+    candidates: list[ParsedArtifactRecord] = [
+        row
+        for row in await txn.pool.list_parses_for_capture(capture_id)
+        if row.id != record.id and row.parse_status != "failed"
+    ]
+    capture = await txn.pool.get_capture(capture_id)
+    if capture is not None:
+        prior = await txn.pool.latest_parse_for_document(
+            capture.document_id, exclude_capture_id=capture_id
+        )
+        if prior is not None and all(
+            row.id != prior.id for row in candidates
+        ):
+            candidates.append(prior)
+
+    for prior in candidates:
+        prior_artifact = _artifact_from_record(prior)
+        result = diff_blocks(
+            prior_artifact, artifact, BLOCK_DIFF_ALGORITHM
+        )
+        await txn.pool.insert_document_diff(
+            DocumentDiffRecord(
+                owner_id=ctx.job.owner_id,
+                from_parse_id=prior.id,
+                to_parse_id=record.id,
+                diff_algorithm_version=result.algorithm_version,
+                kind=result.kind,
+                changed_blocks=list(result.changed_blocks),
+                field_changes=list(result.field_changes),
+            )
+        )
+
+
+def _artifact_from_record(record: ParsedArtifactRecord):
+    """Rehydrate a comparison artifact from the stored row (parser label
+    keyed by the parser_versions id — enough identity for diff
+    classification)."""
+    return ParsedArtifactDTO(
+        capture_id=record.capture_id,
+        parser_version=f"parser:{record.parser_version_id}",
+        metadata=dict(record.artifact_metadata),
+        blocks=[Block(**block) for block in record.blocks],
+        coverage=dict(record.coverage),
+        parse_status=record.parse_status,
+        quality_flags=list(record.quality_flags),
+        text_hash=record.text_hash,
+    )

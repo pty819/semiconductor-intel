@@ -3,7 +3,8 @@
 The fetch workflow writes bytes here and inserts the blob row in the
 same commit transaction; the object key is content-addressed so the
 owner-scoped UNIQUE(owner_id, sha256, media_type) dedup maps 1:1 onto
-identical files on disk.
+identical files on disk. ``read`` serves the parse workflow: it hands
+the raw bytes back without granting the parser any DB access (14 §2).
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ from typing import Protocol
 
 class ObjectStore(Protocol):
     def write(self, data: bytes, *, media_type: str) -> str: ...
+
+    def read(self, object_key: str) -> bytes: ...
 
 
 def content_key(data: bytes, media_type: str) -> str:
@@ -34,6 +37,9 @@ class MemoryObjectStore:
         self.objects.setdefault(key, data)
         return key
 
+    def read(self, object_key: str) -> bytes:
+        return self.objects[object_key]  # KeyError when absent
+
 
 class FileObjectStore:
     """Content-addressed files under one root (settings.object_store_root)."""
@@ -48,3 +54,6 @@ class FileObjectStore:
         if not path.exists():
             path.write_bytes(data)
         return key
+
+    def read(self, object_key: str) -> bytes:
+        return (self._root / object_key).read_bytes()

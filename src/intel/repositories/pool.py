@@ -37,8 +37,10 @@ from intel.db.models.pool import (
     Capture,
     DiscoveryItem,
     Document,
+    DocumentDiff,
     DocumentOrigin,
     FetchObservation,
+    ParsedArtifact,
 )
 from intel.db.models.sources import OwnerFeed, SourceRun
 from intel.db.rls import require_owner_guc, set_scope
@@ -140,6 +142,38 @@ class FetchObservationRecord:
 
 
 @dataclass(slots=True)
+class ParsedArtifactRecord:
+    """parsed_artifacts row (03 §3): block 永久绑定本次 parse."""
+
+    owner_id: UUID
+    capture_id: UUID
+    parser_version_id: UUID
+    normalized_blob_id: UUID
+    text_hash: str
+    blocks: list[dict[str, Any]]
+    artifact_metadata: dict[str, Any]
+    parse_status: str
+    coverage: dict[str, Any]
+    quality_flags: list[str] = field(default_factory=list)
+    parsed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    id: UUID = field(default_factory=uuid4)
+
+
+@dataclass(slots=True)
+class DocumentDiffRecord:
+    """document_diffs row (03 §3): kind=content_change/parser_change/mixed."""
+
+    owner_id: UUID
+    from_parse_id: UUID
+    to_parse_id: UUID
+    diff_algorithm_version: str
+    kind: str
+    changed_blocks: list[dict[str, Any]] = field(default_factory=list)
+    field_changes: list[dict[str, Any]] = field(default_factory=list)
+    id: UUID = field(default_factory=uuid4)
+
+
+@dataclass(slots=True)
 class SourceRunRecord:
     owner_id: UUID
     feed_id: UUID
@@ -225,6 +259,30 @@ class PoolRepository(Protocol):
     async def insert_observation(
         self, observation: FetchObservationRecord
     ) -> FetchObservationRecord: ...
+
+    async def get_capture(self, capture_id: UUID) -> CaptureRecord | None: ...
+
+    async def get_blob(self, blob_id: UUID) -> BlobRecord | None: ...
+
+    async def set_capture_retrieval_scope(
+        self, capture_id: UUID, retrieval_scope: str
+    ) -> None: ...
+
+    async def insert_parsed_artifact(
+        self, record: ParsedArtifactRecord
+    ) -> tuple[ParsedArtifactRecord, bool]: ...
+
+    async def list_parses_for_capture(
+        self, capture_id: UUID
+    ) -> list[ParsedArtifactRecord]: ...
+
+    async def latest_parse_for_document(
+        self, document_id: UUID, *, exclude_capture_id: UUID
+    ) -> ParsedArtifactRecord | None: ...
+
+    async def insert_document_diff(
+        self, record: DocumentDiffRecord
+    ) -> tuple[DocumentDiffRecord, bool]: ...
 
 
 # --------------------------------------------------------------------------
@@ -543,6 +601,155 @@ class SqlAlchemyPoolRepository(ScopedRepository, PoolRepository):
         )
         return observation
 
+    async def get_capture(self, capture_id: UUID) -> CaptureRecord | None:
+        await self._bind_owner()
+        row = (
+            await self.conn.execute(
+                select(Capture).where(
+                    Capture.owner_id == self.owner_id,
+                    Capture.id == capture_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return None if row is None else _capture_record(row)
+
+    async def get_blob(self, blob_id: UUID) -> BlobRecord | None:
+        await self._bind_owner()
+        row = (
+            await self.conn.execute(
+                select(Blob).where(
+                    Blob.owner_id == self.owner_id, Blob.id == blob_id
+                )
+            )
+        ).scalar_one_or_none()
+        return None if row is None else _blob_record(row)
+
+    async def set_capture_retrieval_scope(
+        self, capture_id: UUID, retrieval_scope: str
+    ) -> None:
+        await self._bind_owner()
+        await self.conn.execute(
+            update(Capture)
+            .where(
+                Capture.owner_id == self.owner_id, Capture.id == capture_id
+            )
+            .values(retrieval_scope=retrieval_scope)
+        )
+
+    async def insert_parsed_artifact(
+        self, record: ParsedArtifactRecord
+    ) -> tuple[ParsedArtifactRecord, bool]:
+        """UNIQUE(capture_id, parser_version_id): a conflict binds the
+        existing parse (新 parser 不覆盖旧 parse, 03 §3)."""
+        await self._bind_owner()
+        stmt = (
+            pg_insert(ParsedArtifact)
+            .values(
+                id=record.id,
+                owner_id=record.owner_id,
+                capture_id=record.capture_id,
+                parser_version_id=record.parser_version_id,
+                normalized_blob_id=record.normalized_blob_id,
+                text_hash=record.text_hash,
+                blocks=record.blocks,
+                artifact_metadata=record.artifact_metadata,
+                parse_status=record.parse_status,
+                coverage=record.coverage,
+                quality_flags=record.quality_flags,
+                parsed_at=record.parsed_at,
+            )
+            .on_conflict_do_nothing(
+                index_elements=["capture_id", "parser_version_id"]
+            )
+            .returning(ParsedArtifact.id)
+        )
+        inserted = (await self.conn.execute(stmt)).scalar_one_or_none()
+        if inserted is not None:
+            return record, True
+        existing = (
+            await self.conn.execute(
+                select(ParsedArtifact).where(
+                    ParsedArtifact.owner_id == self.owner_id,
+                    ParsedArtifact.capture_id == record.capture_id,
+                    ParsedArtifact.parser_version_id
+                    == record.parser_version_id,
+                )
+            )
+        ).scalar_one()
+        return _parse_record(existing), False
+
+    async def list_parses_for_capture(
+        self, capture_id: UUID
+    ) -> list[ParsedArtifactRecord]:
+        await self._bind_owner()
+        rows = (
+            await self.conn.execute(
+                select(ParsedArtifact)
+                .where(
+                    ParsedArtifact.owner_id == self.owner_id,
+                    ParsedArtifact.capture_id == capture_id,
+                )
+                .order_by(ParsedArtifact.parsed_at)
+            )
+        ).scalars()
+        return [_parse_record(row) for row in rows]
+
+    async def latest_parse_for_document(
+        self, document_id: UUID, *, exclude_capture_id: UUID
+    ) -> ParsedArtifactRecord | None:
+        await self._bind_owner()
+        row = (
+            await self.conn.execute(
+                select(ParsedArtifact)
+                .join(
+                    Capture,
+                    onclause=(
+                        (Capture.owner_id == ParsedArtifact.owner_id)
+                        & (Capture.id == ParsedArtifact.capture_id)
+                    ),
+                )
+                .where(
+                    ParsedArtifact.owner_id == self.owner_id,
+                    Capture.document_id == document_id,
+                    ParsedArtifact.capture_id != exclude_capture_id,
+                    ParsedArtifact.parse_status != "failed",
+                )
+                .order_by(desc(ParsedArtifact.parsed_at))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return None if row is None else _parse_record(row)
+
+    async def insert_document_diff(
+        self, record: DocumentDiffRecord
+    ) -> tuple[DocumentDiffRecord, bool]:
+        """UNIQUE(from, to, algorithm): replaying the same diff is a
+        no-op that binds the existing row (03 §3)."""
+        await self._bind_owner()
+        stmt = (
+            pg_insert(DocumentDiff)
+            .values(
+                id=record.id,
+                owner_id=record.owner_id,
+                from_parse_id=record.from_parse_id,
+                to_parse_id=record.to_parse_id,
+                diff_algorithm_version=record.diff_algorithm_version,
+                kind=record.kind,
+                changed_blocks=record.changed_blocks,
+                field_changes=record.field_changes,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    "from_parse_id",
+                    "to_parse_id",
+                    "diff_algorithm_version",
+                ]
+            )
+            .returning(DocumentDiff.id)
+        )
+        inserted = (await self.conn.execute(stmt)).scalar_one_or_none()
+        return record, inserted is not None
+
 
 def _item_record(row: DiscoveryItem) -> DiscoveryItemRecord:
     return DiscoveryItemRecord(
@@ -607,6 +814,23 @@ def _capture_record(row: Capture) -> CaptureRecord:
     )
 
 
+def _parse_record(row: ParsedArtifact) -> ParsedArtifactRecord:
+    return ParsedArtifactRecord(
+        id=row.id,
+        owner_id=row.owner_id,
+        capture_id=row.capture_id,
+        parser_version_id=row.parser_version_id,
+        normalized_blob_id=row.normalized_blob_id,
+        text_hash=row.text_hash,
+        blocks=list(row.blocks or []),
+        artifact_metadata=dict(row.artifact_metadata or {}),
+        parse_status=row.parse_status,
+        coverage=dict(row.coverage or {}),
+        quality_flags=list(row.quality_flags or []),
+        parsed_at=row.parsed_at,
+    )
+
+
 # --------------------------------------------------------------------------
 # in-memory adapter (unit tests)
 # --------------------------------------------------------------------------
@@ -626,6 +850,10 @@ class InMemoryPoolDatabase:
         self.captures: dict[UUID, dict[str, Any]] = {}
         self.observations: dict[UUID, dict[str, Any]] = {}
         self.origins: dict[UUID, dict[str, Any]] = {}
+        self.parses: dict[UUID, dict[str, Any]] = {}
+        self.parse_index: dict[tuple[UUID, UUID], UUID] = {}
+        self.diffs: dict[UUID, dict[str, Any]] = {}
+        self.diff_index: dict[tuple[UUID, UUID, str], UUID] = {}
 
     _TABLES = (
         "feeds",
@@ -638,6 +866,10 @@ class InMemoryPoolDatabase:
         "captures",
         "observations",
         "origins",
+        "parses",
+        "parse_index",
+        "diffs",
+        "diff_index",
     )
 
     def snapshot(self) -> dict[str, Any]:
@@ -901,6 +1133,109 @@ class InMemoryPoolStore:
             "feed_id": feed_id,
         }
 
+    async def get_capture(self, capture_id: UUID) -> CaptureRecord | None:
+        row = self.db.captures.get(capture_id)
+        if row is None or row["owner_id"] != self.owner_id:
+            return None
+        return _mem_capture(row)
+
+    async def get_blob(self, blob_id: UUID) -> BlobRecord | None:
+        row = self.db.blobs.get(blob_id)
+        if row is None or row["owner_id"] != self.owner_id:
+            return None
+        return _mem_blob(row)
+
+    async def set_capture_retrieval_scope(
+        self, capture_id: UUID, retrieval_scope: str
+    ) -> None:
+        row = self.db.captures.get(capture_id)
+        if row is not None and row["owner_id"] == self.owner_id:
+            row["retrieval_scope"] = retrieval_scope
+
+    async def insert_parsed_artifact(
+        self, record: ParsedArtifactRecord
+    ) -> tuple[ParsedArtifactRecord, bool]:
+        key = (record.capture_id, record.parser_version_id)
+        existing_id = self.db.parse_index.get(key)
+        if existing_id is not None:
+            return _mem_parse(self.db.parses[existing_id]), False
+        row = {
+            "id": record.id,
+            "owner_id": self.owner_id,
+            "capture_id": record.capture_id,
+            "parser_version_id": record.parser_version_id,
+            "normalized_blob_id": record.normalized_blob_id,
+            "text_hash": record.text_hash,
+            "blocks": copy.deepcopy(record.blocks),
+            "artifact_metadata": copy.deepcopy(record.artifact_metadata),
+            "parse_status": record.parse_status,
+            "coverage": copy.deepcopy(record.coverage),
+            "quality_flags": list(record.quality_flags),
+            "parsed_at": record.parsed_at,
+        }
+        self.db.parses[record.id] = row
+        self.db.parse_index[key] = record.id
+        return _mem_parse(row), True
+
+    async def list_parses_for_capture(
+        self, capture_id: UUID
+    ) -> list[ParsedArtifactRecord]:
+        rows = [
+            row
+            for row in self.db.parses.values()
+            if row["owner_id"] == self.owner_id
+            and row["capture_id"] == capture_id
+        ]
+        rows.sort(key=lambda r: r["parsed_at"])
+        return [_mem_parse(row) for row in rows]
+
+    async def latest_parse_for_document(
+        self, document_id: UUID, *, exclude_capture_id: UUID
+    ) -> ParsedArtifactRecord | None:
+        capture_ids = {
+            capture_id
+            for capture_id, row in self.db.captures.items()
+            if row["owner_id"] == self.owner_id
+            and row["document_id"] == document_id
+            and capture_id != exclude_capture_id
+        }
+        candidates = [
+            row
+            for row in self.db.parses.values()
+            if row["owner_id"] == self.owner_id
+            and row["capture_id"] in capture_ids
+            and row["parse_status"] != "failed"
+        ]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda r: r["parsed_at"])
+        return _mem_parse(candidates[-1])
+
+    async def insert_document_diff(
+        self, record: DocumentDiffRecord
+    ) -> tuple[DocumentDiffRecord, bool]:
+        key = (
+            record.from_parse_id,
+            record.to_parse_id,
+            record.diff_algorithm_version,
+        )
+        existing_id = self.db.diff_index.get(key)
+        if existing_id is not None:
+            return _mem_diff(self.db.diffs[existing_id]), False
+        row = {
+            "id": record.id,
+            "owner_id": self.owner_id,
+            "from_parse_id": record.from_parse_id,
+            "to_parse_id": record.to_parse_id,
+            "diff_algorithm_version": record.diff_algorithm_version,
+            "kind": record.kind,
+            "changed_blocks": copy.deepcopy(record.changed_blocks),
+            "field_changes": copy.deepcopy(record.field_changes),
+        }
+        self.db.diffs[record.id] = row
+        self.db.diff_index[key] = record.id
+        return _mem_diff(row), True
+
 
 def _mem_item(row: Mapping[str, Any]) -> DiscoveryItemRecord:
     return DiscoveryItemRecord(
@@ -962,6 +1297,36 @@ def _mem_capture(row: Mapping[str, Any]) -> CaptureRecord:
         content_type=row["content_type"],
         retrieval_scope=row["retrieval_scope"],
         access_policy=row["access_policy"],
+    )
+
+
+def _mem_parse(row: Mapping[str, Any]) -> ParsedArtifactRecord:
+    return ParsedArtifactRecord(
+        id=row["id"],
+        owner_id=row["owner_id"],
+        capture_id=row["capture_id"],
+        parser_version_id=row["parser_version_id"],
+        normalized_blob_id=row["normalized_blob_id"],
+        text_hash=row["text_hash"],
+        blocks=copy.deepcopy(row["blocks"]),
+        artifact_metadata=copy.deepcopy(row["artifact_metadata"]),
+        parse_status=row["parse_status"],
+        coverage=copy.deepcopy(row["coverage"]),
+        quality_flags=list(row["quality_flags"]),
+        parsed_at=row["parsed_at"],
+    )
+
+
+def _mem_diff(row: Mapping[str, Any]) -> DocumentDiffRecord:
+    return DocumentDiffRecord(
+        id=row["id"],
+        owner_id=row["owner_id"],
+        from_parse_id=row["from_parse_id"],
+        to_parse_id=row["to_parse_id"],
+        diff_algorithm_version=row["diff_algorithm_version"],
+        kind=row["kind"],
+        changed_blocks=copy.deepcopy(row["changed_blocks"]),
+        field_changes=copy.deepcopy(row["field_changes"]),
     )
 
 

@@ -49,6 +49,18 @@ class Settings(BaseSettings):
     fetch_concurrency: int = 8
     search_backfill_days: int = 90
 
+    # -- parse quality thresholds (spec 04 §4; Task 8) ---------------------
+    # usable-text chars / capture bytes outside [min, max] is an anomaly.
+    min_text_ratio: float = 0.01
+    max_text_ratio: float = 0.95
+    # Removed boilerplate share above this flags template-heavy pages.
+    boilerplate_max: float = 0.6
+    # Below this many usable characters the parse is an abstract at best,
+    # and a low text ratio becomes a hard failure (PAR-03).
+    min_text_chars: int = 200
+    # Link-text share over which a page reads as a recommendation list.
+    link_density_max: float = 0.5
+
     # -- retrieval tuning ----------------------------------------------------
     bm25_k1: float = 1.5
     bm25_b: float = 0.75

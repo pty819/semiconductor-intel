@@ -617,6 +617,46 @@ async def test_fetch_js_required_without_browser_is_partial() -> None:
     assert harness.pool_db.items[item_id]["state"] == "pending_js"
 
 
+# -- capture → parse handoff (Task 8, 04 §4) ----------------------------------------
+
+
+async def test_captured_fetch_spawns_parse_job_for_new_capture() -> None:
+    harness = Harness()
+    feed_id = seed_feed(harness.pool_db, owner_id=OWNER)
+    item_id = await seed_prior_capture(
+        harness, feed_id, b"<html><body>v1</body></html>", '"v1"'
+    )
+    body = b"<html><body><main><p>fresh content</p></main></body></html>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-type": "text/html"}, content=body
+        )
+
+    harness.http_handler = handler
+    await enqueue_fetch(harness, item_id)
+    await harness.drain()
+
+    new_capture = next(
+        c for c in harness.pool_db.captures.values()
+        if c["content_hash"] == hashlib.sha256(body).hexdigest()
+    )
+    # The parse job for the new capture was spawned (same commit) and ran.
+    parse_jobs = [
+        j for j in harness.jobs_of_kind("parse")
+        if j["input"]["capture_id"] == str(new_capture["id"])
+    ]
+    assert len(parse_jobs) == 1
+    assert parse_jobs[0]["state"] == "succeeded"
+    assert parse_jobs[0]["progress"]["parse_status"] in ("ok", "partial")
+    # And the parse persisted its artifact bound to that capture.
+    parses = [
+        p for p in harness.pool_db.parses.values()
+        if p["capture_id"] == new_capture["id"]
+    ]
+    assert len(parses) == 1
+
+
 # -- politeness (04 §2) ----------------------------------------------------------------
 
 
