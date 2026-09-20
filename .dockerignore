@@ -1,0 +1,14 @@
+.venv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.git
+.superpowers
+web/node_modules
+web/dist
+traces
+var
+*.sqlite3
+__pycache__
+*.pyc
+.env

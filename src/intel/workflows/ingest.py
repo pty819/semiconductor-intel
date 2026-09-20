@@ -42,6 +42,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from intel.db.rls import set_app_role
 from intel.domain.urlnorm import normalize_url
 from intel.parsing import (
     BLOCK_DIFF_ALGORITHM,
@@ -148,6 +149,7 @@ def sql_ingest_txn_factory(
     @asynccontextmanager
     async def open_ingest(scope: IndustryScope):
         async with engine.connect() as conn, conn.begin():
+            await set_app_role(conn)
             yield IngestTxn(
                 pool=SqlAlchemyPoolRepository(conn, scope),
                 jobs=SqlAlchemyJobsStore(conn, scope),

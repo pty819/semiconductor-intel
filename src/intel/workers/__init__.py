@@ -1,6 +1,6 @@
 """Background workers: lease helpers, scheduler tick, job runner (spec 07).
 
-Task 6 provides the durable-queue core. Handlers for the individual job
-kinds (discover/fetch/parse/index/route/...) are Tasks 7+; the runner ships
-with a no-op default handler so unregistered kinds complete observably.
+The composition root (``intel.workers.composition.build_runtime``) registers
+ingest/route/extract/event_build/archive_answer/investigate/report_build/
+apply_review handlers on a :class:`~intel.workers.runner.JobRunner`.
 """

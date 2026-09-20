@@ -29,6 +29,7 @@ from uuid import UUID
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from intel.db.rls import set_app_role
 from intel.repositories.base import IndustryScope
 from intel.repositories.conversations import SqlAlchemyConversationRepository
 from intel.repositories.documents import SqlAlchemyDocumentRepository
@@ -81,6 +82,7 @@ async def get_conn(request: Request) -> AsyncIterator[AsyncConnection]:
     engine behind it) never runs in unit tests.
     """
     async with request.app.state.engine.connect() as conn, conn.begin():
+        await set_app_role(conn)
         yield conn
 
 

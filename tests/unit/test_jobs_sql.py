@@ -41,6 +41,13 @@ def test_claim_select_uses_for_update_skip_locked_limit_1() -> None:
     assert "FROM jobs" in sql
     assert "jobs.state =" in sql
     assert "jobs.available_at <=" in sql
+    assert "jobs.kind IN" not in sql
+
+
+def test_claim_select_filters_kinds_when_given() -> None:
+    sql = _sql(claim_select_stmt(NOW, kinds=("fetch", "parse")))
+    assert "jobs.kind IN" in sql or "jobs.kind =" in sql
+    assert "FOR UPDATE OF jobs SKIP LOCKED" in sql
 
 
 def test_fenced_update_carries_lease_predicates() -> None:

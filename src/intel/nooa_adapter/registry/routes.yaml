@@ -1,7 +1,8 @@
 # unifiedllm route registry (spec 14 §3.1) — loaded by the factory via
 # nooa.unifiedllm.reload_registry(). Every tier alias points at ONE
 # OpenAI-v1-compatible chat-completions endpoint (Settings.llm_base_url;
-# default the LAN gateway on 192.168.1.21:8000 — any /v1 proxy works).
+# default the LAN llamacpp on 192.168.1.82:8080 — any /v1 proxy works,
+# including a grok2api gateway if you point api_base at it).
 #
 # The api_base mirrors Settings.llm_base_url's default; deployments that
 # move the endpoint edit this file (the registry is the single source of
@@ -10,26 +11,26 @@
 #
 # model_name: the <model> string sent verbatim to POST /v1/chat/completions.
 # The defaults below are PLACEHOLDERS — set them to the model ids your
-# endpoint actually serves (check GET /v1/models) before the M0 provider
-# smoke run. A wrong name fails loudly with a provider 4xx; it is never
-# silently routed. Tiers are assignments, not endorsements — M7's
-# golden-set quality/cost comparison re-decides them.
+# endpoint actually serves (GET /v1/models; llamacpp on 82 reports the
+# loaded GGUF id, e.g. a Bonsai-27B filename). Do NOT commit vendor
+# model literals (no grok-* names). A wrong name fails loudly with a
+# provider 4xx; it is never silently routed.
 models:
   # L1 量大浅判: routing verdicts, cheap classification.
   L1:
     model_name: openai/model-l1
-    api_base: http://192.168.1.21:8000/v1
+    api_base: http://192.168.1.82:8080/v1
     api_key_env: LLM_API_KEY
     drop_params: true
   # L2 结构化抽取与撰写: claim extraction, answer drafting.
   L2:
     model_name: openai/model-l2
-    api_base: http://192.168.1.21:8000/v1
+    api_base: http://192.168.1.82:8080/v1
     api_key_env: LLM_API_KEY
     drop_params: true
   # L3 判断与综合: relation judgement, evolution composition, investigation.
   L3:
     model_name: openai/model-l3
-    api_base: http://192.168.1.21:8000/v1
+    api_base: http://192.168.1.82:8080/v1
     api_key_env: LLM_API_KEY
     drop_params: true

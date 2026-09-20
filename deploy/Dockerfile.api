@@ -1,0 +1,38 @@
+# API / worker / scheduler image. Build from the repo root:
+#   docker compose -f deploy/compose.yaml build api
+#
+# NOOA is an editable path dependency. Pass it as an additional build
+# context named `nooa` (compose sets this from $NOOA_SRC).
+FROM python:3.12-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PATH="/root/.local/bin:$PATH"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh
+
+WORKDIR /app
+
+# NOOA checkout (additional context `nooa`).
+COPY --from=nooa / /opt/nooa
+
+COPY pyproject.toml uv.lock README.md alembic.ini /app/
+COPY src /app/src
+COPY migrations /app/migrations
+
+# Rewrite the machine-local editable path to the image copy.
+RUN sed -i 's|path = "/Users/liyifan/Documents/labs-OO-Agents"|path = "/opt/nooa"|g' \
+        pyproject.toml uv.lock
+
+RUN uv sync --frozen --no-dev
+
+ENV VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH"
+
+EXPOSE 8000
+CMD ["uvicorn", "intel.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

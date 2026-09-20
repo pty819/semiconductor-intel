@@ -29,7 +29,7 @@ and the UNIQUE constraints the real schema carries.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
@@ -115,16 +115,22 @@ class JobEventRecord:
 # --------------------------------------------------------------------------
 
 
-def claim_select_stmt(now: datetime):
+def claim_select_stmt(now: datetime, kinds: Sequence[str] | None = None):
     """The claim scan: oldest available queued row, lock or skip (07 §2).
 
     ``FOR UPDATE OF jobs SKIP LOCKED LIMIT 1`` — two concurrent claims
     leave exactly one winner (JOB-01). Runs in the dispatcher transaction.
+    ``kinds`` restricts the scan to a worker's registered handlers so a
+    fetch-worker cannot claim an extract job (and vice versa).
     """
-    return (
+    stmt = (
         select(_JOB_TABLE)
         .where(_JOB_TABLE.c.state == "queued", _JOB_TABLE.c.available_at <= now)
-        .order_by(_JOB_TABLE.c.available_at, _JOB_TABLE.c.id)
+    )
+    if kinds:
+        stmt = stmt.where(_JOB_TABLE.c.kind.in_(tuple(kinds)))
+    return (
+        stmt.order_by(_JOB_TABLE.c.available_at, _JOB_TABLE.c.id)
         .limit(1)
         .with_for_update(skip_locked=True, of=_JOB_TABLE)
     )
@@ -264,10 +270,19 @@ class JobsStore(Protocol):
 
     # -- claim / requeue / reap (dispatcher role, unscoped) ------------------
     async def claim_next(
-        self, *, now: datetime, lease_token: str, lease_until: datetime
+        self,
+        *,
+        now: datetime,
+        lease_token: str,
+        lease_until: datetime,
+        kinds: Sequence[str] | None = None,
     ) -> JobRecord | None:
         """SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1, then write the lease
-        (state=running, attempt+1) in the same transaction."""
+        (state=running, attempt+1) in the same transaction.
+
+        ``kinds`` limits the scan to those job kinds (composition-root
+        workers); ``None`` claims any queued kind.
+        """
         ...
 
     async def expired_running_jobs(self, now: datetime) -> list[JobRecord]: ...
@@ -447,9 +462,16 @@ class SqlAlchemyJobsStore:
     # -- claim / requeue / reap (dispatcher role) --------------------------------
 
     async def claim_next(
-        self, *, now: datetime, lease_token: str, lease_until: datetime
+        self,
+        *,
+        now: datetime,
+        lease_token: str,
+        lease_until: datetime,
+        kinds: Sequence[str] | None = None,
     ) -> JobRecord | None:
-        row = (await self._conn.execute(claim_select_stmt(now))).first()
+        row = (
+            await self._conn.execute(claim_select_stmt(now, kinds=kinds))
+        ).first()
         if row is None:
             return None
         await self._conn.execute(
@@ -791,8 +813,14 @@ class InMemoryJobsStore:
         return JobStepRecord(**row)
 
     async def claim_next(
-        self, *, now: datetime, lease_token: str, lease_until: datetime
+        self,
+        *,
+        now: datetime,
+        lease_token: str,
+        lease_until: datetime,
+        kinds: Sequence[str] | None = None,
     ) -> JobRecord | None:
+        allowed = frozenset(kinds) if kinds else None
         candidates = sorted(
             (
                 row
@@ -801,6 +829,7 @@ class InMemoryJobsStore:
                 and row["available_at"] is not None
                 and row["available_at"] <= now
                 and self.db.locks.get(jid) in (None, self.session_id)
+                and (allowed is None or row["kind"] in allowed)
             ),
             key=lambda r: (r["available_at"], r["id"]),
         )

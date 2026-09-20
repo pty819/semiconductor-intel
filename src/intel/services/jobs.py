@@ -30,7 +30,7 @@ owns the queue tables); everything after the claim runs owner-scoped —
 from __future__ import annotations
 
 import random
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -365,13 +365,25 @@ class JobService:
 
     # -- claim (07 §2, dispatcher role) --------------------------------------------
 
-    async def claim(self, store: JobsStore, *, now: datetime | None = None) -> JobRecord | None:
+    async def claim(
+        self,
+        store: JobsStore,
+        *,
+        now: datetime | None = None,
+        kinds: Sequence[str] | None = None,
+    ) -> JobRecord | None:
         """Claim the oldest due queued job: SELECT ... FOR UPDATE SKIP
-        LOCKED LIMIT 1, write a fresh 90s lease and attempt+1."""
+        LOCKED LIMIT 1, write a fresh 90s lease and attempt+1.
+
+        ``kinds`` restricts the claim to a worker's registered handlers.
+        """
         now = now if now is not None else self._clock()
         lease = new_lease(now)
         return await store.claim_next(
-            now=now, lease_token=lease.token, lease_until=lease.until
+            now=now,
+            lease_token=lease.token,
+            lease_until=lease.until,
+            kinds=kinds,
         )
 
     # -- lease upkeep (07 §2, worker role) ------------------------------------------

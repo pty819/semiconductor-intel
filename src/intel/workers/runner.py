@@ -157,7 +157,8 @@ class JobRunner:
     async def run_once(self) -> JobRecord | None:
         """Claim one job and run it; ``None`` when the queue is empty."""
         async with self._open_store(None) as store:  # dispatcher role
-            job = await self._service.claim(store)
+            kinds = tuple(self._handlers) if self._handlers else None
+            job = await self._service.claim(store, kinds=kinds)
         if job is None:
             return None
         return await self._execute(job)

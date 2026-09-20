@@ -34,10 +34,10 @@ class Settings(BaseSettings):
 
     # -- model provider ----------------------------------------------------
     # Any OpenAI-v1-compatible chat-completions endpoint (proxy, gateway,
-    # or direct). Env names, INTEL_-prefixed first; the legacy
-    # GROK2API_* spellings keep older .env files working.
+    # or direct). Default: 82 llamacpp. Env names, INTEL_-prefixed first;
+    # the legacy GROK2API_* spellings keep older .env files working.
     llm_base_url: str = Field(
-        default="http://192.168.1.21:8000/v1",
+        default="http://192.168.1.82:8080/v1",
         validation_alias=AliasChoices(
             "intel_llm_base_url",
             "llm_base_url",

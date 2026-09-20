@@ -24,12 +24,27 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 OWNER_GUC = "app.owner_id"
 INDUSTRY_GUC = "app.industry_id"
 
+#: Database role the API and scoped workers SET LOCAL to (spec 10 §1).
+#: Policies are ``TO intel_app``; the dispatcher stays the table owner.
+APP_ROLE = "intel_app"
+
 _SET_CONFIG = text("SELECT set_config(:name, :value, true)")
 _CURRENT_SETTING = text("SELECT current_setting(:name, true) AS value")
+_SET_LOCAL_ROLE = text("SET LOCAL ROLE intel_app")
 
 
 class ScopeMissing(RuntimeError):
     """A scoped write path ran without ``app.owner_id`` set (fail closed)."""
+
+
+async def set_app_role(conn: AsyncConnection) -> None:
+    """``SET LOCAL ROLE intel_app`` — transaction-local, pool-safe.
+
+    The connecting user must be a member of ``intel_app`` (0004 grants
+    that to the migrator). Dispatcher connections must NOT call this:
+    policies are ``TO intel_app`` and the table owner claims the queue.
+    """
+    await conn.execute(_SET_LOCAL_ROLE)
 
 
 async def set_scope(

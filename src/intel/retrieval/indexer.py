@@ -41,7 +41,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from intel.db.models.jobs import CoverageBatch
 from intel.db.models.pool import Chunk, ParsedArtifact
-from intel.db.rls import require_owner_guc, set_scope
+from intel.db.rls import require_owner_guc, set_app_role, set_scope
 from intel.parsing.dto import Block
 from intel.repositories.base import IndustryScope, ScopedRepository
 from intel.repositories.pool import ParsedArtifactRecord
@@ -271,6 +271,7 @@ def sql_index_txn_factory(engine) -> OpenIndexTxn:
     @asynccontextmanager
     async def open_index(scope: IndustryScope) -> AsyncIterator[IndexStore]:
         async with engine.connect() as conn, conn.begin():
+            await set_app_role(conn)
             yield SqlAlchemyIndexStore(conn, scope)
 
     return open_index

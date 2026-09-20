@@ -134,6 +134,15 @@ def make_investigation_gateway(
     return token, gateway
 
 
+def make_bare_investigation_agent(*, v2: bool = False) -> InvestigationAgent:
+    """Investigation agent without a gateway (attached per job by the runner)."""
+    return (
+        InvestigationAgentV2(llm=_default_route_client("L3"))
+        if v2
+        else InvestigationAgent(llm=_default_route_client("L3"))
+    )
+
+
 def make_investigation_agent(
     *, gateway: ToolGateway, v2: bool = False
 ) -> InvestigationAgent:
@@ -213,6 +222,7 @@ __all__ = [
     "investigation_codeact_config",
     "load_route_registry",
     "make_answer_agent",
+    "make_bare_investigation_agent",
     "make_evolution_agent",
     "make_extraction_agent",
     "make_investigation_agent",

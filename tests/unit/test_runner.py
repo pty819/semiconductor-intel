@@ -120,6 +120,29 @@ async def test_run_once_dispatches_registered_handler_by_kind() -> None:
     assert job is not None and job.state == "succeeded"
 
 
+async def test_runner_skips_kinds_without_handlers() -> None:
+    """A fetch-worker must not claim a discover job (composition-root roles)."""
+    seen: list[str] = []
+
+    async def handler(ctx) -> None:
+        seen.append(ctx.job.kind)
+        await ctx.boundary()
+        async with ctx.open_store(
+            IndustryScope(ctx.job.owner_id, ctx.job.industry_id)
+        ) as store:
+            await ctx.service.finish(store, ctx.job, state="succeeded")
+
+    runner, db, _clock = make_runner(handlers={"fetch": handler})
+    service = JobService(clock=FakeClock(), rng=random.Random(3))
+    await seed_job(db, service, kind="discover")
+    assert await runner.run_once() is None
+    assert seen == []
+    await seed_job(db, service, kind="fetch")
+    job = await runner.run_once()
+    assert seen == ["fetch"]
+    assert job is not None and job.kind == "fetch"
+
+
 async def test_runner_cancels_job_at_step_boundary() -> None:
     async def handler(ctx) -> None:
         async with ctx.open_store(
