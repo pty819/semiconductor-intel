@@ -28,7 +28,7 @@ All pins and syntax below were verified against upstream on 2026-09-20.
 |---|---|---|---|---|
 | pgvector | `v0.8.6` | PostgreSQL License | https://github.com/pgvector/pgvector | `CREATE EXTENSION vector`; KNN: `ORDER BY emb <=> '[...]' LIMIT n` |
 | pgvectorscale | tag `0.9.1` | PostgreSQL License | https://github.com/timescale/pgvectorscale | `CREATE EXTENSION vectorscale CASCADE`; `CREATE INDEX ... USING diskann (emb vector_cosine_ops)`; pgrx pinned `=0.16.1` (its Cargo.toml at 0.9.1) |
-| pg_textsearch | `v1.4.0` | PostgreSQL License | https://github.com/timescale/pg_textsearch | `CREATE EXTENSION pg_textsearch`; `CREATE INDEX ... USING bm25 (col) WITH (text_config='jieba')`; score operator `col <@> 'query'` (used as `ORDER BY ... <@> ...`); **requires `shared_preload_libraries='pg_textsearch'`** |
+| pg_textsearch | `v1.4.0` | PostgreSQL License | https://github.com/timescale/pg_textsearch | `CREATE EXTENSION pg_textsearch`; `CREATE INDEX ... USING bm25 (col) WITH (text_config='jieba')`; score operator `col <@> 'query'` — **returns negative BM25 scores** ("returns negative BM25 scores for ascending index scans, so lower scores rank first"), use as `ORDER BY ... <@> ...`; **requires `shared_preload_libraries='pg_textsearch'`** |
 | pg_jieba | 1.1.1 @ `d0ffac8` (last master commit 2022-11-22; repo has no newer release) | BSD-3-Clause | https://github.com/jaiminpan/pg_jieba | parser object is named **`jieba`** (not `pg_jieba` — see its `pg_jieba.sql`); `to_tsvector('jieba', ...)`; token types `n,v,a,i,e,l` all exist (`jieba_token.h`) |
 
 Two facts that differ from the original task sketch, both verified:

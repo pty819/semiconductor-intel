@@ -153,13 +153,16 @@ check "to_tsvector('jieba', ...) segments Chinese" "t" "$out"
 # 6c. pg_textsearch BM25 over the jieba config.
 # Index + score-operator syntax per the pg_textsearch README (verified):
 #   CREATE INDEX ... USING bm25 (col) WITH (text_config='...');
-#   SELECT ... ORDER BY col <@> 'query' LIMIT n;   -- <@> = bm25 score
+#   SELECT ... ORDER BY col <@> 'query' LIMIT n;
+# <@> returns NEGATIVE BM25 scores (README: "returns negative BM25 scores for
+# ascending index scans, so lower scores rank first") — a matching document
+# therefore scores < 0, hence the assertion below.
 out="$(psql_stdin 2>&1 <<'SQL' || true
 DROP TABLE IF EXISTS _smoke_bm25;
 CREATE TABLE _smoke_bm25 (id int PRIMARY KEY, body text);
 INSERT INTO _smoke_bm25 VALUES (1, '先进封装技术需要高深宽比刻蚀工艺');
 CREATE INDEX _smoke_bm25_idx ON _smoke_bm25 USING bm25 (body) WITH (text_config='jieba');
-SELECT (body <@> '刻蚀') > 0 FROM _smoke_bm25 WHERE id = 1;
+SELECT (body <@> '刻蚀') < 0 FROM _smoke_bm25 WHERE id = 1;
 SQL
 )"
 check "pg_textsearch bm25 index + <@> score" "t" "$out"
