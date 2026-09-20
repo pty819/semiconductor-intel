@@ -34,6 +34,10 @@ from intel.repositories.idempotency import (
     IdempotencyRepository,
     SqlAlchemyIdempotencyRepository,
 )
+from intel.repositories.knowledge import (
+    KnowledgeReadRepository,
+    SqlAlchemyKnowledgeRepository,
+)
 from intel.repositories.sources import (
     SourcesRepository,
     SqlAlchemySourcesRepository,
@@ -192,19 +196,22 @@ def get_industry_workspace_repo(
     return SqlAlchemyWorkspaceRepository(conn, scope)
 
 
-def get_sources_repo(
-    principal: CurrentPrincipal, conn: ConnDep
-) -> SourcesRepository:
+def get_sources_repo(principal: CurrentPrincipal, conn: ConnDep) -> SourcesRepository:
     """Owner-scoped sources repo (/feeds routes)."""
-    return SqlAlchemySourcesRepository(
-        conn, IndustryScope(owner_id=principal.user_id)
-    )
+    return SqlAlchemySourcesRepository(conn, IndustryScope(owner_id=principal.user_id))
 
 
 def get_industry_sources_repo(
     scope: IndustryScopeDep, conn: ConnDep
 ) -> SourcesRepository:
     return SqlAlchemySourcesRepository(conn, scope)
+
+
+def get_knowledge_repo(
+    scope: IndustryScopeDep, conn: ConnDep
+) -> KnowledgeReadRepository:
+    """Industry-scoped knowledge reads (timeline/events/evidence/entities)."""
+    return SqlAlchemyKnowledgeRepository(conn, scope)
 
 
 def get_idempotency_repo(
@@ -228,9 +235,7 @@ def get_workspace_service(
 
 
 def get_industry_workspace_service(
-    repo: Annotated[
-        WorkspaceRepository, Depends(get_industry_workspace_repo)
-    ],
+    repo: Annotated[WorkspaceRepository, Depends(get_industry_workspace_repo)],
     enqueuer: Enqueuer,
 ) -> WorkspaceService:
     return WorkspaceService(repo, enqueuer)

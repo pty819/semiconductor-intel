@@ -344,3 +344,39 @@ class TestInsufficiencyAndStale:
 def test_uuid_typing_of_revision_ids() -> None:
     result = build_evolution(stages=[], edge_drafts=[], input_manifest={})
     assert isinstance(result.revision_id, UUID)
+
+
+class TestRoutesRegistered:
+    def test_knowledge_routers_declare_the_05_5_query_surface(self) -> None:
+        from fastapi.routing import APIRoute
+
+        from intel.api.routes import knowledge
+
+        timeline = next(
+            route
+            for route in knowledge.timeline_router.routes
+            if isinstance(route, APIRoute) and route.path.endswith("/timeline")
+        )
+        names = set(timeline.endpoint.__annotations__)
+        for expected in (
+            "topic_ids",
+            "event_types",
+            "window_from",
+            "window_to",
+            "as_of",
+            "include_unknown",
+            "cursor",
+        ):
+            assert expected in names, expected
+
+    def test_all_routers_include_knowledge(self) -> None:
+        from intel.api.routes import all_routers, knowledge
+
+        included = {id(router) for router in all_routers}
+        for router in (
+            knowledge.timeline_router,
+            knowledge.entities_router,
+            knowledge.watches_router,
+            knowledge.evolutions_router,
+        ):
+            assert id(router) in included
