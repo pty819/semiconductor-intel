@@ -1,10 +1,11 @@
 """Acquisition job dispatch port (spec 03 §7, 08 §1 长任务 202).
 
-Task 5 only defines the seam: HTTP routes hand the enqueuer a scope, a kind,
-a JSON payload and the request's Idempotency-Key, and get back the 202 body.
-The real queue — a ``jobs`` row plus scheduling — is Task 6; until then the
-app runs on :class:`InMemoryEnqueuer`, which is also what unit tests use to
-observe dispatched work.
+HTTP routes hand the enqueuer a scope, a kind, a JSON payload and the
+request's Idempotency-Key, and get back the 202 body. Task 6 backed the
+port with the real queue (:class:`intel.services.jobs.JobServiceEnqueuer`
+over the jobs table, wired in ``api.deps.get_enqueuer``);
+:class:`InMemoryEnqueuer` remains the dev/test double — unit tests
+observe dispatched work through its ``records``.
 """
 
 from __future__ import annotations

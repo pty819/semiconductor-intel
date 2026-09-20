@@ -1,7 +1,9 @@
 """FastAPI application factory (spec 08: 同源 HTTPS JSON, /api/v1 前缀).
 
-``create_app`` wires settings, the identity service, the (Task 6 replaceable)
-enqueuer, the error envelope handlers, the request-id middleware and every
+``create_app`` wires settings, the identity service, the jobs-table
+enqueuer (Task 6: ``deps.get_enqueuer`` builds a ``JobServiceEnqueuer``
+over the request connection; setting ``app.state.enqueuer`` swaps in a
+fake), the error envelope handlers, the request-id middleware and every
 Task 5 router. CORS is deliberately NOT configured — the product is
 same-origin and cross-origin credentials are never wildcarded (08 §4).
 
@@ -21,7 +23,6 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from intel.api.errors import register_error_handlers
 from intel.api.routes import all_routers
 from intel.contracts import HealthView
-from intel.services.acquisition import InMemoryEnqueuer
 from intel.services.identity import IdentityService
 from intel.settings import Settings
 
@@ -50,9 +51,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.identity_service = IdentityService.from_settings(settings)
-    # Task 6 swaps this for the jobs-table queue; until then dispatch is
-    # observable in-process (dev/tests only — no durability).
-    app.state.enqueuer = InMemoryEnqueuer()
+    # Dispatch goes through the real jobs table now (Task 6): deps builds a
+    # JobServiceEnqueuer over the request connection. Setting
+    # app.state.enqueuer swaps in a fake (dev/tests).
     app.state.engine = create_async_engine(settings.database_url)
 
     @app.middleware("http")

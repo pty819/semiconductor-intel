@@ -50,6 +50,7 @@ from intel.services.identity import (
     Principal,
     SqlAlchemyIdentityRepository,
 )
+from intel.services.jobs import JobService, JobServiceEnqueuer
 from intel.services.sources import SourcesService
 from intel.services.workspace import WorkspaceService
 
@@ -83,11 +84,14 @@ def get_identity_service(request: Request) -> IdentityService:
     return request.app.state.identity_service
 
 
-def get_enqueuer(request: Request) -> JobEnqueuer:
-    """Task 6 replaces this with the jobs-table queue; until then the
-    in-memory enqueuer keeps dispatch observable for dev and tests."""
-    enqueuer: JobEnqueuer = request.app.state.enqueuer
-    return enqueuer
+def get_enqueuer(request: Request, conn: ConnDep) -> JobEnqueuer:
+    """The Task 6 queue: enqueue lands in the jobs table inside the
+    request's transaction. ``app.state.enqueuer`` (dev/tests) still wins
+    when set, so fakes and the in-memory enqueuer keep working."""
+    override: JobEnqueuer | None = getattr(request.app.state, "enqueuer", None)
+    if override is not None:
+        return override
+    return JobServiceEnqueuer(JobService(), conn)
 
 
 def get_identity_repo(conn: ConnDep) -> IdentityRepository:
