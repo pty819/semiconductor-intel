@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID, uuid4
 
+from intel.contracts.models import TimeValue
 from intel.domain.identity import StrongKey, build_identity_key, key_string
 from intel.domain.validation import ValidatedClaim
 from intel.repositories.base import IndustryScope
@@ -146,7 +147,16 @@ class KnowledgeStore(Protocol):
         identity_key: str | None,
         rationale: str,
         input_manifest: dict,
-    ) -> tuple[UUID, UUID]: ...
+        occurred: Mapping[str, Any] | None = None,
+        published: Mapping[str, Any] | None = None,
+        effective: Mapping[str, Any] | None = None,
+        first_discovered_at: datetime | None = None,
+    ) -> tuple[UUID, UUID]:
+        """``occurred``/``published``/``effective`` are serialized
+        TimeValues (contracts.TimeValue.model_dump — precision validated
+        per 03 §5, ``unknown`` allowed); adapters project
+        ``occurred_start``/``occurred_end`` exactly as the ORM defines
+        them. ``first_discovered_at`` defaults to now when omitted."""
 
     async def link_event_claims(
         self, scope: IndustryScope, *, event_id: UUID, claim_revision_ids: list[UUID]
@@ -331,6 +341,9 @@ async def resolve_event(
             else "no strong identity key; independent event (05 §2)"
         ),
         input_manifest=input_manifest,
+        occurred=dict(proposal.occurred_time) or None,
+        published=None,
+        effective=None,
     )
     await store.link_event_claims(
         scope, event_id=event_id, claim_revision_ids=list(proposal.claim_revision_ids)
@@ -520,8 +533,32 @@ class InMemoryKnowledgeStore:
         identity_key: str | None,
         rationale: str,
         input_manifest: dict,
+        occurred: Mapping[str, Any] | None = None,
+        published: Mapping[str, Any] | None = None,
+        effective: Mapping[str, Any] | None = None,
+        first_discovered_at: datetime | None = None,
     ) -> tuple[UUID, UUID]:
+        from intel.domain.time import occurred_span
+
+        def _validated(
+            raw: Mapping[str, Any] | None,
+        ) -> tuple[dict[str, Any], tuple[datetime | None, datetime | None]]:
+            payload = dict(raw) if raw else {"precision": "unknown"}
+            try:
+                tv = TimeValue.model_validate(payload)
+            except ValueError:
+                # Downgrade-to-unknown, never crash the commit (03 §5).
+                tv = TimeValue(precision="unknown")
+            return (
+                tv.model_dump(mode="json"),
+                occurred_span(tv),
+            )
+
         event_id, revision_id = uuid4(), uuid4()
+        occurred_json, (start, end) = _validated(occurred)
+        published_json, _ = _validated(published)
+        effective_json, _ = _validated(effective)
+        discovered = first_discovered_at or _now()
         self.events[event_id] = {
             "event_type": event_type,
             "row_version": 1,
@@ -532,8 +569,15 @@ class InMemoryKnowledgeStore:
             "event_id": event_id,
             "version": 1,
             "title": title,
+            "summary": summary,
             "identity_key": identity_key,
             "rationale": rationale,
+            "occurred_time": occurred_json,
+            "published_time": published_json,
+            "effective_time": effective_json,
+            "occurred_start": start,
+            "occurred_end": end,
+            "first_discovered_at": discovered,
         }
         if identity_key is not None:
             self.event_keys[identity_key] = event_id

@@ -12,7 +12,7 @@ pending the Task-14 generation wiring (ledgered deviation).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -54,6 +54,7 @@ async def read_timeline(
     as_of: datetime | None = None,
     include_unknown: bool = True,
     cursor: str | None = None,
+    sort: Literal["occurred", "discovered"] = "occurred",
 ) -> dict[str, Any]:
     """05 §5 timeline page: as_of view, window intersection, stable cursor."""
     cards, next_cursor = await repo.list_event_cards(
@@ -65,6 +66,7 @@ async def read_timeline(
         include_unknown=include_unknown,
         cursor=cursor,
         limit=params.limit,
+        sort=sort,
     )
     return {
         "items": cards,

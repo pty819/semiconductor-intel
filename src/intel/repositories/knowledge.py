@@ -25,7 +25,8 @@ documented deviation, ledgered.
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -33,6 +34,7 @@ from sqlalchemy import bindparam, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from intel.contracts.models import TimeValue
 from intel.db.models.conversation import ReviewTask
 from intel.db.models.knowledge import (
     Claim,
@@ -59,6 +61,45 @@ __all__ = [
 ]
 
 _UNKNOWN_TIME = {"precision": "unknown"}
+
+
+def _validated_time(
+    raw: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], tuple[datetime | None, datetime | None]]:
+    """Serialized TimeValue → (validated JSONB payload, occurred projection).
+
+    Precision rules are TimeValue's own validators (03 §5); structurally
+    invalid payloads downgrade to ``unknown`` instead of crashing the
+    commit. The projection follows :func:`intel.domain.time.occurred_span`
+    — exactly what the ORM's ``occurred_start``/``occurred_end`` columns
+    mean.
+    """
+    from intel.domain.time import occurred_span
+
+    payload = dict(raw) if raw else dict(_UNKNOWN_TIME)
+    try:
+        tv = TimeValue.model_validate(payload)
+    except ValueError:
+        tv = TimeValue(precision="unknown")
+        payload = dict(_UNKNOWN_TIME)
+    return payload, occurred_span(tv)
+
+
+def _late_discovery(
+    occurred_start: datetime | None,
+    occurred_end: datetime | None,
+    first_discovered: datetime | None,
+) -> bool:
+    """TIM-02 迟到标记: discovery landed after the occurred span closed.
+
+    Instants (``occurred_end`` NULL) get a one-day grace so a same-day
+    discovery of an announcement is not "late"; unknown dates never carry
+    the marker (nothing to compare against).
+    """
+    if occurred_start is None or first_discovered is None:
+        return False
+    horizon = occurred_end or (occurred_start + timedelta(days=1))
+    return first_discovered > horizon
 
 
 def _quote_sha256(exact_quote: str) -> str:
@@ -92,11 +133,22 @@ class SqlAlchemyKnowledgeRepository(ScopedRepository, KnowledgeReadRepository):
         include_unknown: bool = False,
         cursor: str | None = None,
         limit: int = 50,
+        sort: str = "occurred",
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """Timeline page per 05 §5 (see module docstring for semantics)."""
-        industry_id = await self._bind()
+        """Timeline page per 05 §5 (see module docstring for semantics).
 
-        # Latest revision at-or-before as_of per event.
+        ``sort`` selects the 05 §5 axis: ``occurred`` (default — known
+        dates ascending, the 未知 group last, user-hideable) or
+        ``discovered`` (``first_discovered_at`` ascending; every event is
+        discovery-dated, so the unknown-occurred group does not apply and
+        is always included).
+        """
+        industry_id = await self._bind()
+        if sort not in ("occurred", "discovered"):
+            raise ValueError(f"unknown timeline sort {sort!r}")
+
+        # Latest revision at-or-before as_of per event (id tie-break keeps
+        # the pick deterministic on a shared recorded_at timestamp).
         latest = (
             select(
                 EventRevision.id.label("revision_id"),
@@ -112,7 +164,10 @@ class SqlAlchemyKnowledgeRepository(ScopedRepository, KnowledgeReadRepository):
                 func.row_number()
                 .over(
                     partition_by=EventRevision.event_id,
-                    order_by=EventRevision.recorded_at.desc(),
+                    order_by=(
+                        EventRevision.recorded_at.desc(),
+                        EventRevision.id.desc(),
+                    ),
                 )
                 .label("rn"),
             )
@@ -159,35 +214,49 @@ class SqlAlchemyKnowledgeRepository(ScopedRepository, KnowledgeReadRepository):
                 func.coalesce(latest.c.occurred_end, latest.c.occurred_start)
                 > window_from,
             )
-        elif not include_unknown:
-            # No window: the 未知 group is default-on, user-hideable.
+        elif not include_unknown and sort == "occurred":
+            # No window on the occurred axis: the 未知 group is
+            # default-on, user-hideable. The discovered axis always
+            # includes it — every event is discovery-dated there.
             stmt = stmt.where(latest.c.occurred_start.isnot(None))
 
-        # Stable keyset: known dates ascending, unknown group LAST, then id.
-        stmt = stmt.order_by(
-            latest.c.occurred_start.is_(None),  # False (known) first
-            latest.c.occurred_start.asc().nulls_last(),
-            Event.id.asc(),
-        ).limit(bindparam("limit"))
+        from sqlalchemy import tuple_
 
-        if cursor is not None:
-            (group, start_iso), event_id = decode_cursor(cursor)
-            if group == 1:  # resume inside the unknown group
+        if sort == "discovered":
+            # Stable keyset on (first_discovered, event_id).
+            stmt = stmt.order_by(
+                latest.c.first_discovered.asc().nulls_last(),
+                Event.id.asc(),
+            ).limit(bindparam("limit"))
+            if cursor is not None:
+                (group, start_iso), event_id = decode_cursor(cursor)
+                discovered = datetime.fromisoformat(start_iso or "0001-01-01T00:00:00")
                 stmt = stmt.where(
-                    latest.c.occurred_start.is_(None), Event.id > event_id
+                    tuple_(latest.c.first_discovered, Event.id) > (discovered, event_id)
                 )
-            else:
-                from sqlalchemy import tuple_
-
-                # (start, id) keyset strictly after the cursor position.
-                stmt = stmt.where(
-                    tuple_(latest.c.occurred_start, Event.id)
-                    > (
-                        datetime.fromisoformat(start_iso),
-                        event_id,
-                    ),
-                    latest.c.occurred_start.isnot(None),
-                )
+        else:
+            # Stable keyset: known dates ascending, unknown group LAST, id.
+            stmt = stmt.order_by(
+                latest.c.occurred_start.is_(None),  # False (known) first
+                latest.c.occurred_start.asc().nulls_last(),
+                Event.id.asc(),
+            ).limit(bindparam("limit"))
+            if cursor is not None:
+                (group, start_iso), event_id = decode_cursor(cursor)
+                if group == 1:  # resume inside the unknown group
+                    stmt = stmt.where(
+                        latest.c.occurred_start.is_(None), Event.id > event_id
+                    )
+                else:
+                    # (start, id) keyset strictly after the cursor position.
+                    stmt = stmt.where(
+                        tuple_(latest.c.occurred_start, Event.id)
+                        > (
+                            datetime.fromisoformat(start_iso),
+                            event_id,
+                        ),
+                        latest.c.occurred_start.isnot(None),
+                    )
 
         rows = (
             await self.conn.execute(
@@ -200,8 +269,11 @@ class SqlAlchemyKnowledgeRepository(ScopedRepository, KnowledgeReadRepository):
         next_cursor = None
         if has_more and page:
             row = page[-1]
-            start = row["occurred_start"]
-            key = (1, "") if start is None else (0, start.isoformat())
+            if sort == "discovered":
+                key = (0, row["first_discovered"].isoformat())
+            else:
+                start = row["occurred_start"]
+                key = (1, "") if start is None else (0, start.isoformat())
             next_cursor = encode_cursor(key, row["event_id"])
         return cards, next_cursor
 
@@ -222,7 +294,9 @@ class SqlAlchemyKnowledgeRepository(ScopedRepository, KnowledgeReadRepository):
             "citations": [],
             "document_count": 0,
             "conflict_state": "unknown",
-            "late_discovery": False,
+            "late_discovery": _late_discovery(
+                row["occurred_start"], row["occurred_end"], row["first_discovered"]
+            ),
             "lifecycle": row["lifecycle"],
             "merged_into_id": row["merged_into_id"],
             "generation_refs": [],
@@ -596,10 +670,17 @@ class SqlAlchemyKnowledgeStore(ScopedRepository):
         identity_key: str | None,
         rationale: str,
         input_manifest: dict,
+        occurred: Mapping[str, Any] | None = None,
+        published: Mapping[str, Any] | None = None,
+        effective: Mapping[str, Any] | None = None,
+        first_discovered_at: datetime | None = None,
     ) -> tuple[UUID, UUID]:
         industry_id = await self._bind()
         event_id, revision_id = uuid4(), uuid4()
         now = datetime.now(UTC)
+        occurred_json, (occurred_start, occurred_end) = _validated_time(occurred)
+        published_json, _ = _validated_time(published)
+        effective_json, _ = _validated_time(effective)
         await self.conn.execute(
             pg_insert(Event).values(
                 id=event_id,
@@ -619,10 +700,14 @@ class SqlAlchemyKnowledgeStore(ScopedRepository):
                 version=1,
                 title=title,
                 summary=summary,
-                occurred_time=dict(_UNKNOWN_TIME),
-                published_time=dict(_UNKNOWN_TIME),
-                effective_time=dict(_UNKNOWN_TIME),
-                first_discovered_at=now,
+                occurred_time=occurred_json,
+                published_time=published_json,
+                effective_time=effective_json,
+                # Projection columns of occurred_time (03 §8): instants
+                # carry NULL end (compare by start); unknown stays NULL.
+                occurred_start=occurred_start,
+                occurred_end=occurred_end,
+                first_discovered_at=first_discovered_at or now,
                 identity_key=identity_key,
                 status="ok",
                 rationale=rationale,

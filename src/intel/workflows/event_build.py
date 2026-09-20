@@ -5,6 +5,12 @@ candidate events (proposals only — identity is never the model's job),
 then resolves each through the strong-key registry: boolean auto-merge
 into an existing event, or a new independent event with an optional
 possible_duplicate proposal for weakly-keyed candidates.
+
+Model output is verified, never trusted: the proposal's ``occurred`` time
+expression is parsed into a validated TimeValue by deterministic Python
+(:func:`intel.domain.time.parse_occurrence_time` — unparseable downgrades
+to unknown, never crashes the job), and ``claim_ids`` are filtered against
+the run's committed claim set before any link is written.
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
+from intel.domain.time import parse_occurrence_time
 from intel.repositories.base import IndustryScope
 from intel.services.knowledge import (
     EventProposalInput,
@@ -101,13 +108,30 @@ def make_event_build_handler(wiring: EventBuildWiring) -> JobHandler:
         await ctx.boundary()
 
         resolutions: list[dict] = []
+        dropped_claim_references = 0
         manifest = {"extraction_run_id": str(extraction_run_id)}
+        committed_claim_ids = {str(row["id"]) for row in claims}
         for proposal in list(getattr(proposals, "proposals", []) or [])[
             : wiring.max_proposals
         ]:
-            claim_revision_ids = [
-                UUID(str(cid)) for cid in (getattr(proposal, "claim_ids", None) or [])
+            # Model-proposed claim ids are verified against the run's
+            # committed set (fetched above) — hallucinated ids are
+            # dropped and counted, never blindly inserted.
+            proposal_claim_ids = [
+                str(cid) for cid in (getattr(proposal, "claim_ids", None) or [])
             ]
+            claim_revision_ids = [
+                UUID(cid) for cid in proposal_claim_ids if cid in committed_claim_ids
+            ]
+            dropped_claim_references += len(proposal_claim_ids) - len(
+                claim_revision_ids
+            )
+            # Model proposes the time expression verbatim; deterministic
+            # Python parses + validates it (03 §5 precision, unknown
+            # allowed — an unparseable expression is data, not an error).
+            occurred = parse_occurrence_time(
+                str(getattr(proposal, "occurred", "") or "")
+            )
             candidate = (
                 wiring.similar_candidate_finder(proposal.__dict__)
                 if wiring.similar_candidate_finder is not None
@@ -123,6 +147,7 @@ def make_event_build_handler(wiring: EventBuildWiring) -> JobHandler:
                         summary=str(getattr(proposal, "summary", "")),
                         identity_fields=_identity_fields(proposal),
                         claim_revision_ids=claim_revision_ids,
+                        occurred_time=occurred.model_dump(mode="json"),
                     ),
                     input_manifest=manifest,
                     similar_candidate_event_id=candidate,
@@ -147,6 +172,7 @@ def make_event_build_handler(wiring: EventBuildWiring) -> JobHandler:
                         1 for r in resolutions if r["merged_into_existing"]
                     ),
                     "resolutions": resolutions,
+                    "dropped_claim_references": dropped_claim_references,
                 },
             )
 
