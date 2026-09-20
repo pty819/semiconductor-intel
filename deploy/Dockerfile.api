@@ -25,8 +25,11 @@ COPY pyproject.toml uv.lock README.md alembic.ini /app/
 COPY src /app/src
 COPY migrations /app/migrations
 
-# Rewrite the machine-local editable path to the image copy.
-RUN sed -i 's|path = "/Users/liyifan/Documents/labs-OO-Agents"|path = "/opt/nooa"|g' \
+# Rewrite the machine-local path in BOTH pyproject (`path = "..."`) and
+# uv.lock (`editable = "..."` / `source = { editable = "..." }`). A
+# `path =` only substitution leaves the lock pointing at the host and
+# `uv sync --frozen` fails in the image.
+RUN sed -i 's|/Users/liyifan/Documents/labs-OO-Agents|/opt/nooa|g' \
         pyproject.toml uv.lock
 
 RUN uv sync --frozen --no-dev

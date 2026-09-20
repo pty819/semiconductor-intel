@@ -367,58 +367,44 @@ def sql_jobs_opener(engine: AsyncEngine):
     return open_store
 
 
-def sql_route_opener(engine: AsyncEngine):
+def _worker_opener(engine: AsyncEngine, store_cls):
+    """Worker-role txn: SET LOCAL ROLE intel_app before any DML.
+
+    Connecting as postgres (superuser) would otherwise bypass FORCE RLS.
+    Store methods still bind GUCs; the role switch must happen at open.
+    """
+
     @asynccontextmanager
     async def open_store(scope: IndustryScope):
         async with engine.connect() as conn, conn.begin():
-            yield SqlAlchemyRouteStore(conn, scope)
+            await set_app_role(conn)
+            yield store_cls(conn, scope)
 
     return open_store
+
+
+def sql_route_opener(engine: AsyncEngine):
+    return _worker_opener(engine, SqlAlchemyRouteStore)
 
 
 def sql_extract_opener(engine: AsyncEngine):
-    @asynccontextmanager
-    async def open_store(scope: IndustryScope):
-        async with engine.connect() as conn, conn.begin():
-            yield SqlAlchemyExtractStore(conn, scope)
-
-    return open_store
+    return _worker_opener(engine, SqlAlchemyExtractStore)
 
 
 def sql_event_build_opener(engine: AsyncEngine):
-    @asynccontextmanager
-    async def open_store(scope: IndustryScope):
-        async with engine.connect() as conn, conn.begin():
-            yield SqlAlchemyEventBuildStore(conn, scope)
-
-    return open_store
+    return _worker_opener(engine, SqlAlchemyEventBuildStore)
 
 
 def sql_answer_opener(engine: AsyncEngine):
-    @asynccontextmanager
-    async def open_store(scope: IndustryScope):
-        async with engine.connect() as conn, conn.begin():
-            yield SqlAlchemyAnswerStore(conn, scope)
-
-    return open_store
+    return _worker_opener(engine, SqlAlchemyAnswerStore)
 
 
 def sql_report_opener(engine: AsyncEngine):
-    @asynccontextmanager
-    async def open_store(scope: IndustryScope):
-        async with engine.connect() as conn, conn.begin():
-            yield SqlAlchemyReportStore(conn, scope)
-
-    return open_store
+    return _worker_opener(engine, SqlAlchemyReportStore)
 
 
 def sql_review_opener(engine: AsyncEngine):
-    @asynccontextmanager
-    async def open_store(scope: IndustryScope):
-        async with engine.connect() as conn, conn.begin():
-            yield SqlAlchemyReviewStore(conn, scope)
-
-    return open_store
+    return _worker_opener(engine, SqlAlchemyReviewStore)
 
 
 async def archive_packet_source(

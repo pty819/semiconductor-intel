@@ -66,3 +66,74 @@ def test_cli_worker_help_is_offline() -> None:
     with pytest.raises(SystemExit) as exc:
         main(["worker", "--help"])
     assert exc.value.code == 0
+
+
+def test_dockerfile_rewrites_lockfile_editable_path() -> None:
+    """uv.lock uses `editable = "..."`, not `path = "..."` — both must rewrite."""
+    repo = Path(__file__).resolve().parents[2]
+    dockerfile = (repo / "deploy" / "Dockerfile.api").read_text()
+    assert "s|/Users/liyifan/Documents/labs-OO-Agents|/opt/nooa|g" in dockerfile
+    assert "pyproject.toml uv.lock" in dockerfile
+    assert 's|path = "/Users/liyifan/Documents/labs-OO-Agents"' not in dockerfile
+
+
+class _Begin:
+    def __init__(self, conn) -> None:
+        self._conn = conn
+
+    async def __aenter__(self):
+        return self._conn
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+
+class _RecordingConn:
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    async def execute(self, stmt, parameters=None):
+        self.statements.append(getattr(stmt, "text", None) or str(stmt))
+
+    def begin(self) -> _Begin:
+        return _Begin(self)
+
+
+class _RecordingEngine:
+    def __init__(self) -> None:
+        self.conn = _RecordingConn()
+
+    def connect(self) -> _Begin:
+        return _Begin(self.conn)
+
+
+async def test_worker_openers_set_local_role_intel_app() -> None:
+    """extract/event_build/apply_review/report_build (and siblings) SET ROLE
+    at open — superuser postgres must not bypass FORCE RLS."""
+    from uuid import uuid4
+
+    from intel.repositories.base import IndustryScope
+    from intel.workers.stores import (
+        sql_answer_opener,
+        sql_event_build_opener,
+        sql_extract_opener,
+        sql_report_opener,
+        sql_review_opener,
+        sql_route_opener,
+    )
+
+    scope = IndustryScope(uuid4(), uuid4())
+    factories = (
+        sql_extract_opener,
+        sql_event_build_opener,
+        sql_review_opener,
+        sql_report_opener,
+        sql_route_opener,
+        sql_answer_opener,
+    )
+    for factory in factories:
+        engine = _RecordingEngine()
+        async with factory(engine)(scope):
+            pass
+        joined = "\n".join(engine.conn.statements)
+        assert "SET LOCAL ROLE intel_app" in joined, factory.__name__
