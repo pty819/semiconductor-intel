@@ -34,6 +34,27 @@ def _citations_from_manifest(manifest: dict) -> list[Citation]:
     return citations
 
 
+#: Workflow outcome → messages.status literal (doc 16 §7): ONE mapping,
+#: shared by every writer (SQL store and test doubles alike) so no string
+#: outside the MessageView literal ever reaches the messages table — a row
+#: like status="ok" would 500 every later GET of the conversation.
+ASSISTANT_STATUS_TO_MESSAGE: dict[str, str] = {
+    "ok": "ready",
+    "insufficient_evidence": "partial",
+}
+
+
+def assistant_message_status(workflow_status: str) -> str:
+    """Map an answer workflow outcome onto the MessageView status literal."""
+    try:
+        return ASSISTANT_STATUS_TO_MESSAGE[workflow_status]
+    except KeyError:
+        raise ValueError(
+            f"unknown answer workflow status {workflow_status!r}; expected one"
+            f" of {sorted(ASSISTANT_STATUS_TO_MESSAGE)}"
+        ) from None
+
+
 def message_to_view(row) -> MessageView:
     """Map a messages row (content + citation_manifest) onto MessageView."""
     manifest = dict(getattr(row, "citation_manifest", None) or {})

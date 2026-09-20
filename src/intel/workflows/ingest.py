@@ -103,9 +103,7 @@ class IngestTxn:
     object_store: ObjectStore | None = None
 
 
-OpenIngestTxn = Callable[
-    [IndustryScope], AbstractAsyncContextManager[IngestTxn]
-]
+OpenIngestTxn = Callable[[IndustryScope], AbstractAsyncContextManager[IngestTxn]]
 
 
 class FetcherProtocol(Protocol):
@@ -427,9 +425,7 @@ def make_fetch_handler(wiring: IngestWiring) -> JobHandler:
             if prior.etag:
                 conditional["If-None-Match"] = prior.etag
             if prior.last_modified is not None:
-                conditional["If-Modified-Since"] = format_http_date(
-                    prior.last_modified
-                )
+                conditional["If-Modified-Since"] = format_http_date(prior.last_modified)
 
         deadline_at = min(
             ctx.deadline_at,
@@ -481,7 +477,9 @@ def make_fetch_handler(wiring: IngestWiring) -> JobHandler:
         if result.outcome == "browser_unavailable":
             await _finish_partial(ctx, gaps=["browser_unavailable"])
             return
-        await _finish(ctx, progress={"outcome": result.outcome, "url": result.final_url})
+        await _finish(
+            ctx, progress={"outcome": result.outcome, "url": result.final_url}
+        )
 
     return handler
 
@@ -647,6 +645,16 @@ async def _persist_capture(
 INDEX_CHUNKER_VERSION = CHUNKER_VERSION
 INDEX_EMBEDDING_VERSION = NOOP_EMBEDDING_VERSION
 
+#: Routing analysis version riding the route job's idempotency key — a
+#: bump re-routes every parse, mirroring the index version semantics.
+ROUTE_ANALYSIS_VERSION = "route@1"
+#: The route pass judges every ACTIVE industry of the owner in ONE job
+#: (04 §6 完整增量语义 — no per-document pre-selection), so the per-industry
+#: key parts KIND_SPECS defines for route carry the wildcard pass
+#: identifier rather than any single industry id; the revision each
+#: verdict lands against is resolved per industry at run time.
+ROUTE_INDUSTRY_WILDCARD = "*"
+
 #: Soft cap on flags echoed into job progress (observability only).
 _MAX_PROGRESS_FLAGS = 20
 
@@ -656,10 +664,11 @@ def make_parse_handler(wiring: IngestWiring) -> JobHandler:
 
     The parser itself never touches the DB (14 §2); every persist lands
     in a single transaction: normalized blob, parsed_artifacts row,
-    document_diffs, the capture's refined retrieval_scope and the index
-    job. A parse_status=failed artifact is persisted evidence and the
-    job still succeeds — only genuine execution errors raise
-    ``parser_error`` for the one allowed retry (07 §6)."""
+    document_diffs, the capture's refined retrieval_scope and the two
+    follow-up jobs (index + route). A parse_status=failed artifact is
+    persisted evidence and the job still succeeds — only genuine
+    execution errors raise ``parser_error`` for the one allowed retry
+    (07 §6)."""
 
     async def handler(ctx: RunContext) -> None:
         await ctx.boundary()
@@ -742,11 +751,11 @@ def make_parse_handler(wiring: IngestWiring) -> JobHandler:
             if created:
                 await _persist_diffs(txn, ctx, capture_id, record, artifact)
                 if artifact.parse_status in ("ok", "partial"):
-                    # The index handler (retrieval.indexer.register_index_
-                    # handlers) is attached by the composition root; until
-                    # that wiring lands the runner's default handler marks
-                    # these succeeded with a note (Task 6 convention —
-                    # observable queue).
+                    # Route is index's SIBLING, not its successor (04 §6):
+                    # it reads the parse blocks while index chunks them, so
+                    # both spawn from this same commit and run in parallel.
+                    # A failed enqueue rolls the whole parse commit back —
+                    # the job retries and the spawns converge (07 §3).
                     await jobs_service.enqueue(
                         txn.jobs,
                         ctx.scope,
@@ -763,6 +772,22 @@ def make_parse_handler(wiring: IngestWiring) -> JobHandler:
                                 "parse": str(record.id),
                                 "chunker_version": INDEX_CHUNKER_VERSION,
                                 "embedding_version": INDEX_EMBEDDING_VERSION,
+                            },
+                        ),
+                    )
+                    await jobs_service.enqueue(
+                        txn.jobs,
+                        ctx.scope,
+                        kind="route",
+                        payload={"parse_id": str(record.id)},
+                        idempotency_key=build_idempotency_key(
+                            "route",
+                            {
+                                "owner": str(ctx.job.owner_id),
+                                "industry": ROUTE_INDUSTRY_WILDCARD,
+                                "parse": str(record.id),
+                                "industry_revision": ROUTE_INDUSTRY_WILDCARD,
+                                "analysis_version": ROUTE_ANALYSIS_VERSION,
                             },
                         ),
                     )
@@ -806,9 +831,7 @@ async def _persist_diffs(
         prior = await txn.pool.latest_parse_for_document(
             capture.document_id, exclude_capture_id=capture_id
         )
-        if prior is not None and all(
-            row.id != prior.id for row in candidates
-        ):
+        if prior is not None and all(row.id != prior.id for row in candidates):
             candidates.append(prior)
 
     for prior in candidates:
@@ -835,9 +858,7 @@ async def _persist_diffs(
         else:
             from_artifact, to_artifact = current_artifact, prior_artifact
             from_id, to_id = record.id, prior.id
-        result = diff_blocks(
-            from_artifact, to_artifact, BLOCK_DIFF_ALGORITHM
-        )
+        result = diff_blocks(from_artifact, to_artifact, BLOCK_DIFF_ALGORITHM)
         await txn.pool.insert_document_diff(
             DocumentDiffRecord(
                 owner_id=ctx.job.owner_id,

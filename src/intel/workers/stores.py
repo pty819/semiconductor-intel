@@ -11,17 +11,21 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from intel.contracts.models import SourceBlock
+from intel.contracts.models import ConversationContext, SourceBlock
 from intel.db.models.conversation import Conversation, Message
 from intel.db.models.knowledge import ClaimRevision, Event, EventRevision, Evidence
 from intel.db.models.pool import Capture, ParsedArtifact, ProcessingDecision
 from intel.db.models.workspace import Industry, IndustryRevision
 from intel.db.rls import require_owner_guc, set_app_role, set_scope
 from intel.repositories.base import IndustryScope
+from intel.repositories.conversations import (
+    assistant_message_status,
+    message_to_view,
+)
 from intel.repositories.jobs import SqlAlchemyJobsStore
 from intel.repositories.knowledge import SqlAlchemyKnowledgeStore
 from intel.repositories.reports import SqlAlchemyReportRepository
@@ -153,7 +157,9 @@ class SqlAlchemyRouteStore:
                 )
             ).scalar_one_or_none()
         if revision_id is None:
-            raise ValueError(f"industry {industry_id} has no revision to decide against")
+            raise ValueError(
+                f"industry {industry_id} has no revision to decide against"
+            )
         decision_id = uuid4()
         allowed = {"direct", "background", "uncertain", "unrelated"}
         stored_outcome = outcome if outcome in allowed else "uncertain"
@@ -183,6 +189,9 @@ class SqlAlchemyExtractStore:
         self.conn = conn
         self.scope = scope
         self.knowledge = SqlAlchemyKnowledgeStore(conn, scope)
+        # Same-transaction job queue handle (the RouteStore pattern): the
+        # event_build spawn rides the extraction commit itself.
+        self.jobs = SqlAlchemyJobsStore(conn, scope)
 
     async def get_source_blocks(self, parse_id: UUID) -> list[SourceBlock] | None:
         await bind_app(self.conn, self.scope)
@@ -271,6 +280,7 @@ class SqlAlchemyAnswerStore:
         question: str,
         blocks: list[dict[str, Any]],
         status: str,
+        referenced_ids: list[str] | None = None,
     ) -> UUID:
         await bind_app(self.conn, scope)
         industry_id = scope.require_industry_id()
@@ -298,9 +308,26 @@ class SqlAlchemyAnswerStore:
             + 1
         )
         message_id = uuid4()
-        text = "\n".join(
-            str(block.get("text") or "") for block in blocks if block.get("text")
-        ) or question
+        text = (
+            "\n".join(
+                str(block.get("text") or "") for block in blocks if block.get("text")
+            )
+            or question
+        )
+        # The in-flight user turn settles in THIS transaction (16 §6):
+        # pending → ready, otherwise the serial-turn guard in begin_turn
+        # would reject every later turn of the conversation forever.
+        await self.conn.execute(
+            update(Message)
+            .where(
+                Message.owner_id == scope.owner_id,
+                Message.industry_id == industry_id,
+                Message.conversation_id == conversation_id,
+                Message.role == "user",
+                Message.status == "pending",
+            )
+            .values(status="ready")
+        )
         await self.conn.execute(
             pg_insert(Message).values(
                 id=message_id,
@@ -309,14 +336,21 @@ class SqlAlchemyAnswerStore:
                 conversation_id=conversation_id,
                 role="assistant",
                 content=text,
-                status=status,
+                # Workflow outcome → the MessageView status literal happens
+                # in exactly one place (assistant_message_status); unknown
+                # outcomes raise instead of persisting an unreadable row.
+                status=assistant_message_status(status),
                 parent_message_id=(
                     conversation.last_committed_message_id
                     if conversation is not None
                     else None
                 ),
                 turn_index=turn_index,
-                citation_manifest={"blocks": blocks, "question": question},
+                citation_manifest={
+                    "blocks": blocks,
+                    "question": question,
+                    "referenced_ids": list(referenced_ids or []),
+                },
             )
         )
         if conversation is not None:
@@ -476,3 +510,66 @@ async def archive_packet_source(
             "coverage": {"processed": len(evidence), "failed": 0, "gaps": []},
             "read_blocks": [item["block_id"] for item in evidence],
         }
+
+
+async def conversation_context_source(
+    engine: AsyncEngine,
+    scope: IndustryScope,
+    conversation_id: UUID,
+    *,
+    exclude_message_id: UUID | None = None,
+    recent_messages: int = 12,
+) -> ConversationContext | None:
+    """Planner context for one conversation: the recent committed turns.
+
+    One short transaction; the QueryPlanner's LLM call happens after this
+    returns, outside any transaction (07 §2). ``exclude_message_id``
+    drops the turn being answered — its text IS the question handed to
+    the planner. Assistant turns surface their cited ids through the
+    blocks' citation_ids (message_to_view), which is what a follow-up
+    resolves pronouns against.
+    """
+    async with engine.connect() as conn, conn.begin():
+        await bind_app(conn, scope)
+        industry_id = scope.require_industry_id()
+        conversation = (
+            await conn.execute(
+                select(Conversation).where(
+                    Conversation.id == conversation_id,
+                    Conversation.owner_id == scope.owner_id,
+                    Conversation.industry_id == industry_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if conversation is None:
+            return None
+        rows = (
+            (
+                await conn.execute(
+                    select(Message)
+                    .where(
+                        Message.owner_id == scope.owner_id,
+                        Message.industry_id == industry_id,
+                        Message.conversation_id == conversation_id,
+                    )
+                    .order_by(Message.turn_index.desc(), Message.created_at.desc())
+                    .limit(recent_messages)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        views = [
+            message_to_view(row)
+            for row in reversed(rows)
+            if row.id != exclude_message_id
+        ]
+        return ConversationContext(
+            conversation_id=conversation_id,
+            state_version=max(int(conversation.state_version or 1), 1),
+            resolved_question="",
+            recent_messages=views,
+            constraints=[],
+            ordered_references=[],
+            open_questions=[],
+        )

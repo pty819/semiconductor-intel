@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -25,6 +26,7 @@ from intel.api.deps import (
     get_identity_repo,
     get_industry_workspace_repo,
     get_job_event_log,
+    get_job_event_opener,
     get_jobs_repo,
     get_principal,
     get_report_repo,
@@ -346,6 +348,14 @@ def harness():
     app.dependency_overrides[get_generation_repo] = lambda: generation
     app.dependency_overrides[get_jobs_repo] = lambda: jobs
     app.dependency_overrides[get_job_event_log] = lambda: event_log
+
+    @asynccontextmanager
+    async def _open_event_log():
+        # The SSE poll opener: production opens one short transaction per
+        # batch; the fake just reuses the in-memory log.
+        yield event_log
+
+    app.dependency_overrides[get_job_event_opener] = lambda: _open_event_log
 
     return {
         "app": app,

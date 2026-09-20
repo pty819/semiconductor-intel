@@ -21,7 +21,12 @@ from uuid import UUID
 from intel.repositories.base import IndustryScope
 from intel.services.research import Mode, build_evidence_packet
 from intel.workers.runner import JobHandler, RunContext
-from intel.workflows.answer import AnswerStore
+from intel.workflows.answer import (
+    AnswerStore,
+    ConversationSource,
+    QueryPlannerProtocol,
+    resolve_followup_question,
+)
 
 PacketSource = Callable[[IndustryScope, str], Awaitable[dict[str, Any]]]
 OpenInvestigateTxn = Callable[[IndustryScope], AbstractAsyncContextManager[AnswerStore]]
@@ -38,6 +43,10 @@ class InvestigateWiring:
     agent: InvestigationAgentProtocol
     packet_source: PacketSource | None = None
     gateway_factory: GatewayFactory | None = None
+    #: CHAT-01 planner (optional): restates the question against recent
+    #: turns before the packet/agent run. Unwired → raw question.
+    query_planner: QueryPlannerProtocol | None = None
+    conversation_source: ConversationSource | None = None
 
 
 def _attach_gateway(
@@ -57,7 +66,22 @@ def make_investigate_handler(wiring: InvestigateWiring) -> JobHandler:
         payload = ctx.job.input
         question = str(payload["question"])
         conversation_id = UUID(str(payload["conversation_id"]))
+        pending_message_id = (
+            UUID(str(payload["message_id"])) if payload.get("message_id") else None
+        )
         online = bool(payload.get("online", False))
+
+        # CHAT-01: the packet and the agent see the RESTATED question —
+        # pronouns/shorthand resolved against the conversation, outside
+        # any transaction. referenced_ids persist with the answer so the
+        # NEXT turn's planner can resolve against them.
+        question, referenced_ids = await resolve_followup_question(
+            wiring,
+            ctx,
+            question=question,
+            conversation_id=conversation_id,
+            pending_message_id=pending_message_id,
+        )
 
         tool_calls: list[str] = []
         status = "ok"
@@ -122,6 +146,7 @@ def make_investigate_handler(wiring: InvestigateWiring) -> JobHandler:
                 question=question,
                 blocks=blocks,
                 status=status,
+                referenced_ids=referenced_ids,
             )
 
         async with ctx.open_store(ctx.scope) as job_store:
@@ -134,6 +159,7 @@ def make_investigate_handler(wiring: InvestigateWiring) -> JobHandler:
                     "blocks": len(blocks),
                     "unresolved": unresolved,
                     "tool_calls": tool_calls,
+                    "referenced_ids": referenced_ids,
                     "answer_message_id": str(answer_message_id),
                 },
             )

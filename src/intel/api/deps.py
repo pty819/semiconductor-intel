@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hmac
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 from uuid import UUID
 
@@ -260,6 +261,29 @@ def get_job_event_log(principal: CurrentPrincipal, conn: ConnDep):
     return SqlAlchemyJobEventLog(store)
 
 
+def get_job_event_opener(request: Request, principal: CurrentPrincipal):
+    """Short-lived event-log opener for SSE poll batches (07 §7).
+
+    ``get_conn``'s transaction cannot serve the poll loop: FastAPI closes
+    yield-dependencies only after the response finishes streaming, so a
+    request-scoped log would pin one connection idle-in-transaction for
+    the stream's whole lifetime. Each call here is one connect+begin+
+    commit — the SSE handshake may ride the request transaction, the
+    polls never do.
+    """
+    engine = request.app.state.engine
+    owner_id = principal.user_id
+
+    @asynccontextmanager
+    async def open_log() -> AsyncIterator[SqlAlchemyJobEventLog]:
+        async with engine.connect() as conn, conn.begin():
+            await set_app_role(conn)
+            store = SqlAlchemyJobsStore(conn, IndustryScope(owner_id=owner_id))
+            yield SqlAlchemyJobEventLog(store)
+
+    return open_log
+
+
 def get_idempotency_repo(
     principal: CurrentPrincipal, conn: ConnDep
 ) -> IdempotencyRepository:
@@ -329,6 +353,7 @@ __all__ = [
     "get_industry_workspace_repo",
     "get_industry_workspace_service",
     "get_job_event_log",
+    "get_job_event_opener",
     "get_jobs_repo",
     "get_principal",
     "get_report_repo",

@@ -158,6 +158,12 @@ class RouteStoreDouble:
 class ExtractStoreDouble:
     knowledge: InMemoryKnowledgeStore
     blocks: dict[UUID, list[SourceBlock]]
+    jobs_db: InMemoryJobsDatabase = field(default_factory=InMemoryJobsDatabase)
+
+    @property
+    def jobs(self):
+        # Same-transaction queue handle for the event_build spawn.
+        return InMemoryJobsStore(self.jobs_db)
 
     async def get_source_blocks(self, parse_id):
         return self.blocks.get(parse_id)
@@ -243,6 +249,7 @@ async def _run_sample(sample: dict[str, Any]) -> tuple[list[dict[str, Any]], int
     extract_wiring = ExtractWiring(
         open_store=open_extract,
         agent=FakeLLMExtractAgent(llm),
+        jobs=JobService(clock=_now, rng=random.Random(3)),
     )
     route_runner = JobRunner(service, open_jobs)
     route_runner.register("route", make_route_handler(route_wiring))

@@ -31,7 +31,7 @@ from intel.repositories.pool import (
     InMemoryPoolStore,
     seed_feed,
 )
-from intel.services.jobs import JobService
+from intel.services.jobs import JobService, build_idempotency_key
 from intel.sources.adapters.cursor import decode_cursor
 from intel.sources.blobstore import MemoryObjectStore
 from intel.sources.fetcher import HttpFetcher
@@ -39,7 +39,15 @@ from intel.sources.pageclient import PageResponse
 from intel.sources.politeness import PolitenessGate
 from intel.sources.ssrf import UrlGuard
 from intel.workers.runner import JobRunner
-from intel.workflows.ingest import IngestTxn, IngestWiring, register_ingest_handlers
+from intel.workflows.ingest import (
+    INDEX_CHUNKER_VERSION,
+    INDEX_EMBEDDING_VERSION,
+    ROUTE_ANALYSIS_VERSION,
+    ROUTE_INDUSTRY_WILDCARD,
+    IngestTxn,
+    IngestWiring,
+    register_ingest_handlers,
+)
 
 T0 = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 SEED = "https://news.example.com/feed.xml"
@@ -128,7 +136,8 @@ class Harness:
             follow_redirects=False,
         )
         self.http_handler = lambda req: httpx.Response(
-            200, headers={"content-type": "text/html"},
+            200,
+            headers={"content-type": "text/html"},
             content=b"<html><body>default</body></html>",
         )
         wiring = IngestWiring(
@@ -140,9 +149,7 @@ class Harness:
                 clock=self.clock,
             ),
             object_store=self.objects,
-            politeness=PolitenessGate(
-                clock=lambda: self.now, sleep=self._fake_sleep
-            ),
+            politeness=PolitenessGate(clock=lambda: self.now, sleep=self._fake_sleep),
             clock=self.clock,
         )
         self.service = JobService(clock=self.clock, rng=random.Random(7))
@@ -164,9 +171,7 @@ class Harness:
         self.now += seconds
 
     @asynccontextmanager
-    async def _open_ingest(
-        self, scope: IndustryScope
-    ) -> AsyncIterator[IngestTxn]:
+    async def _open_ingest(self, scope: IndustryScope) -> AsyncIterator[IngestTxn]:
         pool_snap = self.pool_db.snapshot()
         jobs_snap = _jobs_snapshot(self.jobs_db)
         txn = IngestTxn(
@@ -220,9 +225,7 @@ def rss_xml(links: list[str], next_url: str | None, hours_ago: int) -> bytes:
     return (
         '<?xml version="1.0"?>'
         '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">'
-        f"<channel><title>News</title>{next_tag}"
-        + "".join(items)
-        + "</channel></rss>"
+        f"<channel><title>News</title>{next_tag}" + "".join(items) + "</channel></rss>"
     ).encode()
 
 
@@ -399,8 +402,11 @@ async def seed_prior_capture(
     digest = hashlib.sha256(body).hexdigest()
     blob = await store.insert_blob(
         BlobRecord(
-            owner_id=OWNER, object_key=f"raw/{digest[:2]}/{digest}",
-            sha256=digest, media_type="text/html", byte_size=len(body),
+            owner_id=OWNER,
+            object_key=f"raw/{digest[:2]}/{digest}",
+            sha256=digest,
+            media_type="text/html",
+            byte_size=len(body),
         )
     )
     document = await store.insert_document(
@@ -509,9 +515,7 @@ async def test_fetch_unchanged_200_binds_prior_capture_ing04() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         # Server ignored the conditional and returned 200 with the SAME
         # bytes: hash equality must not mint a new capture version.
-        return httpx.Response(
-            200, headers={"content-type": "text/html"}, content=body
-        )
+        return httpx.Response(200, headers={"content-type": "text/html"}, content=body)
 
     harness.http_handler = handler
     await enqueue_fetch(harness, item_id)
@@ -626,24 +630,24 @@ async def test_captured_fetch_spawns_parse_job_for_new_capture() -> None:
     item_id = await seed_prior_capture(
         harness, feed_id, b"<html><body>v1</body></html>", '"v1"'
     )
-    body = b"<html><body><main><p>fresh content</p></main></body></html>"
+    body = b"<html><body><main><p>fresh content</p></main></html></html>"
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, headers={"content-type": "text/html"}, content=body
-        )
+        return httpx.Response(200, headers={"content-type": "text/html"}, content=body)
 
     harness.http_handler = handler
     await enqueue_fetch(harness, item_id)
     await harness.drain()
 
     new_capture = next(
-        c for c in harness.pool_db.captures.values()
+        c
+        for c in harness.pool_db.captures.values()
         if c["content_hash"] == hashlib.sha256(body).hexdigest()
     )
     # The parse job for the new capture was spawned (same commit) and ran.
     parse_jobs = [
-        j for j in harness.jobs_of_kind("parse")
+        j
+        for j in harness.jobs_of_kind("parse")
         if j["input"]["capture_id"] == str(new_capture["id"])
     ]
     assert len(parse_jobs) == 1
@@ -651,10 +655,89 @@ async def test_captured_fetch_spawns_parse_job_for_new_capture() -> None:
     assert parse_jobs[0]["progress"]["parse_status"] in ("ok", "partial")
     # And the parse persisted its artifact bound to that capture.
     parses = [
-        p for p in harness.pool_db.parses.values()
+        p
+        for p in harness.pool_db.parses.values()
         if p["capture_id"] == new_capture["id"]
     ]
     assert len(parses) == 1
+
+
+async def test_parse_spawns_index_and_route_siblings() -> None:
+    """The chain continues past parse (04 §4/§6): one ok/partial parse
+    spawns BOTH the index job and the route job in the same commit —
+    siblings, not a sequence — with keys composed from KIND_SPECS."""
+    harness = Harness()
+    feed_id = seed_feed(harness.pool_db, owner_id=OWNER)
+    item_id = await seed_prior_capture(
+        harness, feed_id, b"<html><body>v1</body></html>", '"v1"'
+    )
+    body = b"<html><body><main><p>fresh content</p></main></html>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/html"}, content=body)
+
+    harness.http_handler = handler
+    await enqueue_fetch(harness, item_id)
+    await harness.drain()
+
+    parse_job = harness.jobs_of_kind("parse")[0]
+    assert parse_job["state"] == "succeeded"
+    parse_id = parse_job["progress"]["parse_id"]
+
+    index_jobs = [
+        j for j in harness.jobs_of_kind("index") if j["input"]["parse_id"] == parse_id
+    ]
+    route_jobs = [
+        j for j in harness.jobs_of_kind("route") if j["input"]["parse_id"] == parse_id
+    ]
+    assert len(index_jobs) == 1
+    assert len(route_jobs) == 1
+    # Keys composed exactly from KIND_SPECS (07 §3 authoritative table).
+    assert index_jobs[0]["idempotency_key"] == build_idempotency_key(
+        "index",
+        {
+            "owner": str(OWNER),
+            "parse": parse_id,
+            "chunker_version": INDEX_CHUNKER_VERSION,
+            "embedding_version": INDEX_EMBEDDING_VERSION,
+        },
+    )
+    assert route_jobs[0]["idempotency_key"] == build_idempotency_key(
+        "route",
+        {
+            "owner": str(OWNER),
+            "industry": ROUTE_INDUSTRY_WILDCARD,
+            "parse": parse_id,
+            "industry_revision": ROUTE_INDUSTRY_WILDCARD,
+            "analysis_version": ROUTE_ANALYSIS_VERSION,
+        },
+    )
+
+
+async def test_parse_failed_status_spawns_neither_index_nor_route() -> None:
+    """A failed parse is persisted evidence only: no index, no route
+    (PAR-03 — 不强行生成全文分析)."""
+    harness = Harness()
+    feed_id = seed_feed(harness.pool_db, owner_id=OWNER)
+    item_id = await seed_prior_capture(
+        harness, feed_id, b"<html><body>v1</body></html>", '"v1"'
+    )
+    # Empty page: zero usable text with no explanation → parse_status
+    # failed (04 §4 hard flag), persisted as evidence.
+    body = b"<html><body></body></html>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/html"}, content=body)
+
+    harness.http_handler = handler
+    await enqueue_fetch(harness, item_id)
+    await harness.drain()
+
+    parse_job = harness.jobs_of_kind("parse")[0]
+    assert parse_job["state"] == "succeeded"  # failure is data, not an error
+    assert parse_job["progress"]["parse_status"] == "failed"
+    assert harness.jobs_of_kind("index") == []
+    assert harness.jobs_of_kind("route") == []
 
 
 # -- politeness (04 §2) ----------------------------------------------------------------
@@ -706,7 +789,8 @@ async def test_fetch_respects_min_interval_between_same_domain_items() -> None:
     harness = Harness()
     feed_id = seed_feed(harness.pool_db, owner_id=OWNER)
     harness.http_handler = lambda req: httpx.Response(
-        200, headers={"content-type": "text/html"},
+        200,
+        headers={"content-type": "text/html"},
         content=b"<html><body>polite</body></html>",
     )
     store = InMemoryPoolStore(harness.pool_db, IndustryScope(owner_id=OWNER))
@@ -714,8 +798,11 @@ async def test_fetch_respects_min_interval_between_same_domain_items() -> None:
     for n in (1, 2):
         item, _ = await store.upsert_discovery_item(
             DiscoveryItemRecord(
-                owner_id=OWNER, feed_id=feed_id, discovered_url=url(n),
-                canonical_url=url(n), origin_kind="rss",
+                owner_id=OWNER,
+                feed_id=feed_id,
+                discovered_url=url(n),
+                canonical_url=url(n),
+                origin_kind="rss",
             )
         )
         ids.append(item.id)

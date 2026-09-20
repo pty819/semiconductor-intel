@@ -16,16 +16,24 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
 from intel.contracts.models import ExtractionInput, SourceBlock
 from intel.repositories.base import IndustryScope
+from intel.repositories.jobs import JobsStore
+from intel.services.jobs import JobService, build_idempotency_key
 from intel.services.knowledge import KnowledgeStore, commit_extraction
 from intel.workers.runner import JobFailure, JobHandler, RunContext
 
 MAX_REJECTIONS_IN_PROGRESS = 50
+
+#: Event identity policy version riding the event_build job's idempotency
+#: key (Task 6 KIND_SPECS: industry/extraction_commit/event_policy_version)
+#: — a bump re-runs event building for a committed extraction, mirroring
+#: EXTRACTION_VERSION on the extract spawn.
+EVENT_POLICY_VERSION = "event-policy@1"
 
 
 class ExtractionAgentProtocol(Protocol):
@@ -43,6 +51,9 @@ class ExtractStore(Protocol):
 
     knowledge: KnowledgeStore
 
+    #: same-transaction job queue handle (the RouteStore pattern)
+    jobs: JobsStore
+
 
 OpenExtractTxn = Callable[[IndustryScope], AbstractAsyncContextManager[ExtractStore]]
 
@@ -51,6 +62,8 @@ OpenExtractTxn = Callable[[IndustryScope], AbstractAsyncContextManager[ExtractSt
 class ExtractWiring:
     open_store: OpenExtractTxn
     agent: ExtractionAgentProtocol
+    #: Queue service for the chained event_build spawn (05 §2).
+    jobs: JobService = field(default_factory=JobService)
     semantic_judge: SemanticJudge | None = None
     extraction_run_id: UUID | None = None
     origin_ref: str | None = None
@@ -101,6 +114,7 @@ def make_extract_handler(wiring: ExtractWiring) -> JobHandler:
             "claims_proposed": len(claims),
         }
         extraction_run_id = wiring.extraction_run_id or ctx.job.id
+        event_build_job_id: str | None = None
         async with wiring.open_store(ctx.scope) as store:
             commit = await commit_extraction(
                 store.knowledge,
@@ -114,6 +128,27 @@ def make_extract_handler(wiring: ExtractWiring) -> JobHandler:
                 input_manifest=manifest,
                 origin_ref=wiring.origin_ref,
             )
+            if result.accepted:
+                # Claims landed: schedule this run's event building in the
+                # SAME commit (05 §2). The commit identity in the key is the
+                # extraction run — every committed run builds events once;
+                # a failed enqueue rolls the whole commit back, so the
+                # extract job retries and the spawn converges (07 §3).
+                event_job, _created = await wiring.jobs.enqueue(
+                    store.jobs,
+                    ctx.scope,
+                    kind="event_build",
+                    payload={"extraction_run_id": str(extraction_run_id)},
+                    idempotency_key=build_idempotency_key(
+                        "event_build",
+                        {
+                            "industry": str(ctx.scope.require_industry_id()),
+                            "extraction_commit": str(extraction_run_id),
+                            "event_policy_version": EVENT_POLICY_VERSION,
+                        },
+                    ),
+                )
+                event_build_job_id = str(event_job.id)
 
         state = "extraction_failed" if result.all_rejected else "ok"
         async with ctx.open_store(ctx.scope) as job_store:
@@ -133,6 +168,7 @@ def make_extract_handler(wiring: ExtractWiring) -> JobHandler:
                         str(rid) for rid in commit.claim_revision_ids
                     ],
                     "extraction_run_id": str(extraction_run_id),
+                    "event_build_job": event_build_job_id,
                 },
             )
 

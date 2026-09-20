@@ -15,6 +15,7 @@ from intel.api.deps import (
     Enqueuer,
     cursor_signing_key,
     get_job_event_log,
+    get_job_event_opener,
     get_jobs_repo,
 )
 from intel.api.idempotency import IdempotencyGuard, idempotency
@@ -33,6 +34,7 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 Repo = Annotated[object, Depends(get_jobs_repo)]
 Log = Annotated[object, Depends(get_job_event_log)]
+Opener = Annotated[object, Depends(get_job_event_opener)]
 Guard = Annotated[IdempotencyGuard, Depends(idempotency)]
 _RETRYABLE = frozenset({"failed", "cancelled", "partial"})
 
@@ -95,12 +97,17 @@ async def job_events(
     request: Request,
     repo: Repo,
     log: Log,
+    opener: Opener,
 ):
+    # Handshake (existence + cursor expiry) on the request transaction;
+    # the poll loop then opens one short transaction per batch through
+    # ``opener`` — never the request txn, which FastAPI holds until the
+    # stream finishes.
     job = await repo.get_job(job_id)
     if job is None:
         raise NotFound("job not found")
     try:
-        return await sse_stream(request, job_id=job_id, log=log)
+        return await sse_stream(request, job_id=job_id, log=log, open_log=opener)
     except EventCursorExpired as exc:
         raise EventCursorExpiredError(str(exc)) from exc
 

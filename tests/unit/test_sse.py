@@ -125,6 +125,33 @@ class TestHeartbeatAndEnd:
         assert "event: stream_end" in body
 
 
+class TestPollTransactions:
+    async def test_each_poll_batch_opens_its_own_log(self):
+        """The poll loop must not ride the request transaction: every
+        batch opens (and closes) its own short-lived log context."""
+        from contextlib import asynccontextmanager
+
+        log = FakeLog(EVENTS, active=True)
+        opened: list[int] = []
+
+        @asynccontextmanager
+        async def open_log():
+            opened.append(1)
+            yield log
+
+        response = await sse_stream(
+            FakeRequest(None),
+            job_id=JOB,
+            log=log,
+            open_log=open_log,
+            poll_seconds=0,
+            batch_limit=2,  # force a second poll for the third event
+        )
+        chunks = await collect(response, 3)
+        assert len(chunks) == 3
+        assert len(opened) >= 2  # one fresh context per poll batch
+
+
 async def collect(response, max_chunks: int) -> list[str]:
     out: list[str] = []
     async for chunk in response.body_iterator:

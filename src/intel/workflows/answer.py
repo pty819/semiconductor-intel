@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 from uuid import UUID
 
+from intel.contracts import ConversationContext
 from intel.repositories.base import IndustryScope
 from intel.services.research import Mode, build_evidence_packet
 from intel.workers.runner import JobHandler, RunContext
@@ -34,9 +35,21 @@ class AnswerAgentProtocol(Protocol):
     ) -> Any: ...
 
 
+class QueryPlannerProtocol(Protocol):
+    """CHAT-01: resolve a follow-up against the conversation context."""
+
+    async def resolve_followup(
+        self, context: ConversationContext, question: str
+    ) -> Any: ...
+
+
 #: Assemble the archive materials for one question: claims/events/evidence
 #: dicts (already fixed-revision) + coverage. Returns the packet inputs.
 PacketSource = Callable[[IndustryScope, str], Awaitable[dict[str, Any]]]
+
+#: Load the planner context for one conversation (one short transaction):
+#: (scope, conversation_id, pending_message_id) → context or None.
+ConversationSource = Callable[..., Awaitable[ConversationContext | None]]
 
 
 @dataclass(slots=True)
@@ -58,6 +71,7 @@ class AnswerStore(Protocol):
         question: str,
         blocks: list[dict[str, Any]],
         status: str,
+        referenced_ids: list[str] | None = None,
     ) -> UUID: ...
 
 
@@ -69,6 +83,10 @@ class AnswerWiring:
     open_store: OpenAnswerTxn
     agent: AnswerAgentProtocol
     packet_source: PacketSource
+    #: CHAT-01 planner (optional): restates the question against recent
+    #: turns before the packet is assembled. Unwired → raw question.
+    query_planner: QueryPlannerProtocol | None = None
+    conversation_source: ConversationSource | None = None
 
 
 def _repair_or_drop(
@@ -90,12 +108,58 @@ def _repair_or_drop(
     return repaired, dropped
 
 
+async def resolve_followup_question(
+    wiring,
+    ctx: RunContext,
+    *,
+    question: str,
+    conversation_id: UUID,
+    pending_message_id: UUID | None,
+) -> tuple[str, list[str]]:
+    """CHAT-01: restate the question against the recent turns.
+
+    The conversation read is one short transaction; the planner LLM call
+    happens after it returns, OUTSIDE any transaction (07 §2). Falls back
+    to the raw question when no planner is wired or the conversation has
+    no history to resolve against.
+    """
+    planner = getattr(wiring, "query_planner", None)
+    source = getattr(wiring, "conversation_source", None)
+    if planner is None or source is None:
+        return question, []
+    context = await source(ctx.scope, conversation_id, pending_message_id)
+    if context is None or not context.recent_messages:
+        return question, []
+    await ctx.boundary()
+    resolution = await planner.resolve_followup(context, question)
+    rewritten = str(getattr(resolution, "rewritten_question", "") or "")
+    referenced = [
+        str(item) for item in (getattr(resolution, "referenced_ids", None) or [])
+    ]
+    return (rewritten or question), referenced
+
+
 def make_answer_handler(wiring: AnswerWiring) -> JobHandler:
     async def handler(ctx: RunContext) -> None:
         await ctx.boundary()
         payload = ctx.job.input
         question = str(payload["question"])
         conversation_id = UUID(str(payload["conversation_id"]))
+        pending_message_id = (
+            UUID(str(payload["message_id"])) if payload.get("message_id") else None
+        )
+
+        # CHAT-01: the packet and the agent see the RESTATED question —
+        # pronouns/shorthand resolved against the conversation, outside
+        # any transaction. referenced_ids persist with the answer so the
+        # NEXT turn's planner can resolve against them.
+        question, referenced_ids = await resolve_followup_question(
+            wiring,
+            ctx,
+            question=question,
+            conversation_id=conversation_id,
+            pending_message_id=pending_message_id,
+        )
 
         materials = await wiring.packet_source(ctx.scope, question)
         packet = build_evidence_packet(
@@ -146,6 +210,7 @@ def make_answer_handler(wiring: AnswerWiring) -> JobHandler:
                 question=question,
                 blocks=commit.blocks,
                 status=commit.status,
+                referenced_ids=referenced_ids,
             )
 
         async with ctx.open_store(ctx.scope) as job_store:
@@ -159,6 +224,7 @@ def make_answer_handler(wiring: AnswerWiring) -> JobHandler:
                     "dropped_citations": commit.dropped_citations,
                     "unresolved": commit.unresolved,
                     "tool_calls": commit.tool_calls,  # QA-01: stays []
+                    "referenced_ids": referenced_ids,
                     "answer_message_id": (
                         str(commit.answer_message_id)
                         if commit.answer_message_id

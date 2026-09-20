@@ -19,6 +19,7 @@ from intel.nooa_adapter.factory import (
     make_bare_investigation_agent,
     make_extraction_agent,
     make_investigation_gateway,
+    make_query_planner_agent,
     make_routing_agent,
     prepare_job_agent,
 )
@@ -43,6 +44,7 @@ from intel.workers.runner import JobHandler, JobRunner, RunContext
 from intel.workers.stores import (
     archive_packet_source,
     bind_app,
+    conversation_context_source,
     sql_answer_opener,
     sql_event_build_opener,
     sql_extract_opener,
@@ -117,7 +119,9 @@ def _wants(role: str, kind: str) -> bool:
     return not kinds or kind in kinds
 
 
-def _prepare(agent, ctx: RunContext, settings: Settings, sink: InMemoryUsageSink) -> None:
+def _prepare(
+    agent, ctx: RunContext, settings: Settings, sink: InMemoryUsageSink
+) -> None:
     prepare_job_agent(
         agent,
         owner_id=ctx.job.owner_id,
@@ -136,13 +140,24 @@ def _wrap_per_job(
     wiring_factory: Callable[..., object],
     settings: Settings,
     sink: InMemoryUsageSink,
+    planner_factory: Callable | None = None,
 ) -> JobHandler:
-    """Build a fresh agent (middleware budget is per-job) then run the handler."""
+    """Build a fresh agent (middleware budget is per-job) then run the handler.
+
+    ``planner_factory`` (answer/investigate) builds the per-job
+    QueryPlanner agent with the same middleware treatment; its wiring
+    factory then receives ``(agent, planner)``.
+    """
 
     async def handler(ctx: RunContext) -> None:
         agent = agent_factory()
         _prepare(agent, ctx, settings, sink)
-        inner = make_handler(wiring_factory(agent))
+        if planner_factory is None:
+            inner = make_handler(wiring_factory(agent))
+        else:
+            planner = planner_factory()
+            _prepare(planner, ctx, settings, sink)
+            inner = make_handler(wiring_factory(agent, planner))
         await inner(ctx)
 
     return handler
@@ -157,7 +172,9 @@ def build_runtime(
     """Wire SQL stores, agents, and the JobRunner for one worker process."""
     settings = settings if settings is not None else Settings()
     load_route_registry()
-    engine = engine if engine is not None else create_async_engine(settings.database_url)
+    engine = (
+        engine if engine is not None else create_async_engine(settings.database_url)
+    )
     service = JobService()
     open_jobs = sql_jobs_opener(engine)
     runner = JobRunner(service, open_jobs)
@@ -227,7 +244,7 @@ def build_runtime(
                 agent_factory=make_extraction_agent,
                 make_handler=make_extract_handler,
                 wiring_factory=lambda agent: ExtractWiring(
-                    open_store=open_extract, agent=agent
+                    open_store=open_extract, agent=agent, jobs=service
                 ),
                 settings=settings,
                 sink=sink,
@@ -252,6 +269,13 @@ def build_runtime(
     async def packet_source(scope: IndustryScope, question: str) -> dict:
         return await archive_packet_source(engine, scope, question)
 
+    async def conversation_source(scope, conversation_id, pending_message_id=None):
+        # CHAT-01: one short transaction; the planner LLM call happens
+        # after it returns, outside any transaction.
+        return await conversation_context_source(
+            engine, scope, conversation_id, exclude_message_id=pending_message_id
+        )
+
     open_answer = sql_answer_opener(engine)
     if _wants(role, "archive_answer"):
         runner.register(
@@ -259,13 +283,16 @@ def build_runtime(
             _wrap_per_job(
                 agent_factory=make_answer_agent,
                 make_handler=make_answer_handler,
-                wiring_factory=lambda agent: AnswerWiring(
+                wiring_factory=lambda agent, planner: AnswerWiring(
                     open_store=open_answer,
                     agent=agent,
                     packet_source=packet_source,
+                    query_planner=planner,
+                    conversation_source=conversation_source,
                 ),
                 settings=settings,
                 sink=sink,
+                planner_factory=make_query_planner_agent,
             ),
         )
 
@@ -334,14 +361,17 @@ def build_runtime(
             _wrap_per_job(
                 agent_factory=make_bare_investigation_agent,
                 make_handler=make_investigate_handler,
-                wiring_factory=lambda agent: InvestigateWiring(
+                wiring_factory=lambda agent, planner: InvestigateWiring(
                     open_store=open_answer,
                     agent=agent,
                     packet_source=packet_source,
                     gateway_factory=gateway_factory,
+                    query_planner=planner,
+                    conversation_source=conversation_source,
                 ),
                 settings=settings,
                 sink=sink,
+                planner_factory=make_query_planner_agent,
             ),
         )
 
@@ -404,7 +434,10 @@ def assert_required_kinds(runner: JobRunner, *, role: str = "all") -> None:
     if role == "all":
         needed = REQUIRED_KINDS
     else:
-        needed = tuple(k for k in ROLE_KINDS[role] if k in REQUIRED_KINDS) or ROLE_KINDS[role]
+        needed = (
+            tuple(k for k in ROLE_KINDS[role] if k in REQUIRED_KINDS)
+            or ROLE_KINDS[role]
+        )
     missing = [kind for kind in needed if kind not in have]
     if missing:
         raise RuntimeError(f"worker role {role!r} missing handlers: {missing}")

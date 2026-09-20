@@ -18,7 +18,8 @@ Semantics:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -92,11 +93,30 @@ async def sse_stream(
     *,
     job_id: UUID,
     log: JobEventLog,
+    open_log: Callable[[], AbstractAsyncContextManager[JobEventLog]] | None = None,
     heartbeat_seconds: float = HEARTBEAT_SECONDS,
     poll_seconds: float = 1.0,
     batch_limit: int = 100,
 ) -> StreamingResponse:
-    """One job's event stream with replay + heartbeat + clean completion."""
+    """One job's event stream with replay + heartbeat + clean completion.
+
+    ``log`` serves the synchronous handshake (cursor expiry check) on the
+    caller's — request-scoped — transaction. ``open_log`` opens ONE
+    SHORT-LIVED transaction per poll batch: FastAPI closes yield-
+    dependencies only after the response finishes streaming, so polling
+    through the request transaction would pin one connection
+    idle-in-transaction for the stream's whole lifetime. Production must
+    pass ``open_log``; the default reuses ``log`` (the in-memory fakes'
+    single-object contract).
+    """
+    if open_log is None:
+
+        @asynccontextmanager
+        async def _reuse_log() -> AsyncIterator[JobEventLog]:
+            yield log
+
+        open_log = _reuse_log
+
     cursor = _last_event_id(request)
     if cursor is not None:
         earliest = await log.earliest_seq(job_id)
@@ -113,7 +133,11 @@ async def sse_stream(
         while True:
             if await request.is_disconnected():
                 return
-            batch = await log.events_after(job_id, current, limit=batch_limit)
+            # One short transaction per batch: no connection is held
+            # open across the sleep below.
+            async with open_log() as poll_log:
+                batch = await poll_log.events_after(job_id, current, limit=batch_limit)
+                active = await poll_log.job_is_active(job_id)
             for event in batch:
                 rendered = SseEvent(
                     seq=int(event["seq"]),
@@ -122,7 +146,7 @@ async def sse_stream(
                 )
                 current = rendered.seq
                 yield rendered.render()
-            if not await log.job_is_active(job_id) and not batch:
+            if not active and not batch:
                 # Terminal: nothing more will land; the final batch (if
                 # any) has already been yielded above.
                 yield "event: stream_end\ndata: {}\n\n"

@@ -29,14 +29,18 @@ from intel.contracts.models import (
 )
 from intel.repositories.base import IndustryScope
 from intel.repositories.jobs import InMemoryJobsDatabase, InMemoryJobsStore
-from intel.services.jobs import JobService
+from intel.services.jobs import JobService, build_idempotency_key
 from intel.services.knowledge import InMemoryKnowledgeStore
 from intel.workers.runner import JobRunner
 from intel.workflows.event_build import (
     EventBuildWiring,
     make_event_build_handler,
 )
-from intel.workflows.extract import ExtractWiring, make_extract_handler
+from intel.workflows.extract import (
+    EVENT_POLICY_VERSION,
+    ExtractWiring,
+    make_extract_handler,
+)
 from intel.workflows.route import RouteWiring, make_route_handler
 
 OWNER = uuid4()
@@ -215,6 +219,11 @@ class FakeExtractAgent:
 class ExtractStoreDouble:
     knowledge: InMemoryKnowledgeStore
     blocks: dict[UUID, list[SourceBlock]]
+    jobs_db: InMemoryJobsDatabase = field(default_factory=InMemoryJobsDatabase)
+
+    @property
+    def jobs(self):
+        return InMemoryJobsStore(self.jobs_db)
 
     async def get_source_blocks(self, parse_id):
         return self.blocks.get(parse_id)
@@ -247,21 +256,32 @@ BAD_CLAIM = ClaimProposal(
 
 
 class TestExtractHandler:
+    def _wiring(self, store: ExtractStoreDouble, agent):
+        @asynccontextmanager
+        async def open(scope):
+            yield store
+
+        return ExtractWiring(
+            open_store=open,
+            agent=agent,
+            jobs=JobService(
+                clock=lambda: __import__("datetime").datetime.now(
+                    __import__("datetime").UTC
+                )
+            ),
+        )
+
     async def test_mixed_proposal_keeps_good_preserves_rejections(self):
         parse_id = uuid4()
         store = ExtractStoreDouble(
             knowledge=InMemoryKnowledgeStore(), blocks={parse_id: BLOCKS}
         )
-
-        @asynccontextmanager
-        async def open(scope):
-            yield store
-
-        wiring = ExtractWiring(
-            open_store=open,
-            agent=FakeExtractAgent(ExtractionProposal(claims=[GOOD_CLAIM, BAD_CLAIM])),
+        wiring = self._wiring(
+            store, FakeExtractAgent(ExtractionProposal(claims=[GOOD_CLAIM, BAD_CLAIM]))
         )
-        runner, db, service = _runner("extract", make_extract_handler(wiring), open)
+        runner, db, service = _runner(
+            "extract", make_extract_handler(wiring), wiring.open_store
+        )
         await service.enqueue(
             InMemoryJobsStore(db),
             IndustryScope(OWNER, INDUSTRY_A),
@@ -280,22 +300,34 @@ class TestExtractHandler:
         evidence = next(iter(store.knowledge.evidence.values()))
         assert evidence["start_char"] == 5  # after 官方公告：
         assert evidence["semantic_support_status"] == "pending"
+        # Committed claims chain: the extraction run's event_build job was
+        # spawned (same commit), keyed from KIND_SPECS.
+        run_id = UUID(str(result.progress["extraction_run_id"]))
+        spawned = [j for j in store.jobs_db.jobs.values() if j["kind"] == "event_build"]
+        assert len(spawned) == 1
+        assert spawned[0]["state"] == "queued"
+        assert spawned[0]["input"] == {"extraction_run_id": str(run_id)}
+        assert spawned[0]["idempotency_key"] == build_idempotency_key(
+            "event_build",
+            {
+                "industry": str(INDUSTRY_A),
+                "extraction_commit": str(run_id),
+                "event_policy_version": EVENT_POLICY_VERSION,
+            },
+        )
+        assert result.progress["event_build_job"] == str(spawned[0]["id"])
 
     async def test_all_rejected_still_succeeds_as_data(self):
         parse_id = uuid4()
         store = ExtractStoreDouble(
             knowledge=InMemoryKnowledgeStore(), blocks={parse_id: BLOCKS}
         )
-
-        @asynccontextmanager
-        async def open(scope):
-            yield store
-
-        wiring = ExtractWiring(
-            open_store=open,
-            agent=FakeExtractAgent(ExtractionProposal(claims=[BAD_CLAIM])),
+        wiring = self._wiring(
+            store, FakeExtractAgent(ExtractionProposal(claims=[BAD_CLAIM]))
         )
-        runner, db, service = _runner("extract", make_extract_handler(wiring), open)
+        runner, db, service = _runner(
+            "extract", make_extract_handler(wiring), wiring.open_store
+        )
         await service.enqueue(
             InMemoryJobsStore(db),
             IndustryScope(OWNER, INDUSTRY_A),
@@ -307,6 +339,12 @@ class TestExtractHandler:
         assert result is not None and result.state == "succeeded"
         assert result.progress["state"] == "extraction_failed"
         assert not store.knowledge.claim_revisions
+        # Nothing committed → no event_build spawn (it would find no
+        # claims and fail extraction_missing).
+        assert [
+            j for j in store.jobs_db.jobs.values() if j["kind"] == "event_build"
+        ] == []
+        assert result.progress["event_build_job"] is None
 
 
 @dataclass
