@@ -74,3 +74,16 @@ async def test_golden_runner_writes_trajectory_and_behavior_placeholder(
     ):
         assert stage in behavior["leak_stage_counts"]
     assert set(behavior["signals"]) >= {"python_cells", "completion_calls"}
+
+    direct_ids = {
+        json.loads(path.read_text())["id"]
+        for topic in TOPICS
+        for path in (GOLDEN_ROOT / topic).glob("*.json")
+        if json.loads(path.read_text())["labels"]["decision"] == "direct"
+    }
+    extract_events = [
+        event for event in trajectory if event["event_type"] == "ExtractStage"
+    ]
+    assert {event["sample_id"] for event in extract_events} == direct_ids
+    assert all((event.get("accepted") or 0) >= 1 for event in extract_events)
+    assert behavior["leak_stage_counts"]["extract_error"] == 0

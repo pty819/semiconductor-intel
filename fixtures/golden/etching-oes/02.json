@@ -22,7 +22,7 @@
       "confidence": "high",
       "reasons": ["OES 监控算法用于刻蚀终点"],
       "block_references": [
-        { "block_id": "b001", "quote": "根据 OES 时间序列判断介质刻蚀终点" }
+        { "block_id": "b001", "quote": "根据 OES 时间序列判断介质刻蚀终点，准确率报告为 96%" }
       ]
     },
     "extraction": {
@@ -35,7 +35,7 @@
           "evidence": [
             {
               "block_id": "b001",
-              "exact_quote": "根据 OES 时间序列判断介质刻蚀终点",
+              "exact_quote": "根据 OES 时间序列判断介质刻蚀终点，准确率报告为 96%",
               "relation": "supports"
             }
           ]

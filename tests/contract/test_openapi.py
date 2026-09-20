@@ -254,7 +254,7 @@ def test_exemptions_are_documented_and_still_apply() -> None:
     assert stale_extra == [], f"design now includes extra-exempted path: {stale_extra}"
     assert unknown_missing == [], f"exemption not in design openapi: {unknown_missing}"
     assert unknown_extra == [], f"exemption not a live path: {unknown_extra}"
-    assert EXEMPT_MISSING_PATHS and EXEMPT_EXTRA_PATHS
+    # Empty exemption dicts are fine once every deferred route has landed.
 
 
 def test_correction_command_union_matches_design_schema() -> None:
