@@ -18,7 +18,7 @@ Offline:
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -240,3 +240,134 @@ class TestEvidencePacket:
             read_blocks=["doc-1#b003", "doc-1#b004"],
         )
         assert packet.actually_read_blocks == frozenset({"doc-1#b003", "doc-1#b004"})
+
+
+# ---------------------------------------------------------------------------
+# Review lifecycle (05 §4 / 08): expected_versions + idempotency + undo
+# ---------------------------------------------------------------------------
+
+from intel.services.reviews import (
+    ReviewDecisionKind,
+    ReviewRecord,
+    ReviewService,
+    ReviewStateError,
+    ReviewVersionConflict,
+)
+
+
+class InMemoryReviewStore:
+    def __init__(self) -> None:
+        self.reviews: dict = {}
+        self.versions: dict = {}
+        self.audit: list[dict] = []
+        self.applied: list[UUID] = []
+        self.compensated: list[UUID] = []
+
+    async def get_review(self, review_id):
+        return self.reviews.get(review_id)
+
+    async def row_versions(self, refs):
+        return {ref: self.versions.get(ref, 1) for ref in refs}
+
+    async def save_review(self, review):
+        self.reviews[review.id] = review
+
+    async def append_audit(self, entry):
+        self.audit.append(entry)
+
+    async def apply_decision(self, review):
+        self.applied.append(review.id)
+        return {"applied": str(review.id)}
+
+    async def compensate(self, review):
+        self.compensated.append(review.id)
+
+
+def _review_store_with_merge():
+    store = InMemoryReviewStore()
+    review = ReviewRecord(
+        id=uuid4(), object_type="event_merge", payload={"canonical": "a"}
+    )
+    store.reviews[review.id] = review
+    store.versions[("events", uuid4())] = 3
+    ref = next(iter(store.versions))
+    return store, review, ref
+
+
+class TestReviews:
+    async def test_approve_checks_expected_versions(self):
+        store, review, ref = _review_store_with_merge()
+        service = ReviewService(store)
+        import pytest as _pytest
+
+        with _pytest.raises(ReviewVersionConflict):
+            await service.decide(
+                review_id=review.id,
+                actor=uuid4(),
+                decision=ReviewDecisionKind.APPROVE,
+                expected_versions={ref: 2},  # stale
+            )
+        assert review.status == "pending"  # nothing written
+        assert store.applied == []
+
+    async def test_approve_applies_once_then_idempotent(self):
+        store, review, ref = _review_store_with_merge()
+        service = ReviewService(store)
+        actor = uuid4()
+        first = await service.decide(
+            review_id=review.id,
+            actor=actor,
+            decision=ReviewDecisionKind.APPROVE,
+            expected_versions={ref: 3},
+        )
+        assert first.applied and first.status == "approved"
+        again = await service.decide(
+            review_id=review.id,
+            actor=actor,
+            decision=ReviewDecisionKind.APPROVE,
+            expected_versions={ref: 3},
+        )
+        assert not again.applied and again.result == {"idempotent": True}
+        assert len(store.applied) == 1  # at-least-once delivery safe
+
+    async def test_reject_does_not_apply(self):
+        store, review, ref = _review_store_with_merge()
+        service = ReviewService(store)
+        outcome = await service.decide(
+            review_id=review.id,
+            actor=uuid4(),
+            decision=ReviewDecisionKind.REJECT,
+            expected_versions={ref: 3},
+        )
+        assert outcome.status == "rejected" and not outcome.applied
+        assert store.applied == []
+
+    async def test_undo_compensates_and_reopens(self):
+        store, review, ref = _review_store_with_merge()
+        service = ReviewService(store)
+        await service.decide(
+            review_id=review.id,
+            actor=uuid4(),
+            decision=ReviewDecisionKind.APPROVE,
+            expected_versions={ref: 3},
+        )
+        outcome = await service.undo(review_id=review.id, actor=uuid4())
+        assert outcome.status == "pending"
+        assert review.status == "undone" and review.compensated
+        assert store.compensated == [review.id]
+        # Double undo rejects instead of double-compensating.
+        import pytest as _pytest
+
+        with _pytest.raises(ReviewStateError):
+            await service.undo(review_id=review.id, actor=uuid4())
+
+    async def test_every_decision_audited(self):
+        store, review, ref = _review_store_with_merge()
+        service = ReviewService(store)
+        await service.decide(
+            review_id=review.id,
+            actor=uuid4(),
+            decision=ReviewDecisionKind.APPROVE,
+            expected_versions={ref: 3},
+        )
+        assert [entry["action"] for entry in store.audit] == ["review.approve"]
