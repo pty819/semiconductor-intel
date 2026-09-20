@@ -1,0 +1,47 @@
+{
+  "id": "oes-01",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成：OES 终点检测 811.5 nm",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成工艺：氧化硅刻蚀以 811.5 nm 氩原子线作为 OES 终点检测通道。"
+    }
+  ],
+  "labels": { "decision": "direct", "topics": ["OES 监控算法"] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "article",
+      "summary": "合成：811.5 nm 氩线作 OES 终点检测。",
+      "domains": ["etching", "oes"]
+    },
+    "verdict": {
+      "decision": "direct",
+      "confidence": "high",
+      "reasons": ["OES 终点检测波长"],
+      "block_references": [
+        { "block_id": "b001", "quote": "811.5 nm 氩原子线作为 OES 终点检测通道" }
+      ]
+    },
+    "extraction": {
+      "claims": [
+        {
+          "text": "氧化硅刻蚀以 811.5 nm 氩原子线作为 OES 终点检测通道",
+          "kind": "source_statement",
+          "attribution": "合成工艺",
+          "conditions": [],
+          "evidence": [
+            {
+              "block_id": "b001",
+              "exact_quote": "811.5 nm 氩原子线作为 OES 终点检测通道",
+              "relation": "supports"
+            }
+          ]
+        }
+      ],
+      "limitations": ["合成样本"]
+    }
+  }
+}

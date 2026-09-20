@@ -1,0 +1,47 @@
+{
+  "id": "rf-02",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成：RF bias 设定 200 V",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成工艺卡：下层硅刻蚀时 RF bias 设定为 200 V，匹配网络自动调谐。"
+    }
+  ],
+  "labels": { "decision": "direct", "topics": ["RF/射频"] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "article",
+      "summary": "合成：硅刻蚀 RF bias 200 V 并自动匹配。",
+      "domains": ["etching", "rf"]
+    },
+    "verdict": {
+      "decision": "direct",
+      "confidence": "high",
+      "reasons": ["RF bias 与硅刻蚀工艺卡"],
+      "block_references": [
+        { "block_id": "b001", "quote": "RF bias 设定为 200 V" }
+      ]
+    },
+    "extraction": {
+      "claims": [
+        {
+          "text": "下层硅刻蚀时 RF bias 设定为 200 V",
+          "kind": "source_statement",
+          "attribution": "合成工艺卡",
+          "conditions": [],
+          "evidence": [
+            {
+              "block_id": "b001",
+              "exact_quote": "RF bias 设定为 200 V",
+              "relation": "supports"
+            }
+          ]
+        }
+      ],
+      "limitations": ["合成样本"]
+    }
+  }
+}

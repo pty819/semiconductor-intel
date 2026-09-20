@@ -1,0 +1,47 @@
+{
+  "id": "rf-03",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成：脉冲射频 1 kHz",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成笔记：脉冲射频电源工作在 1 kHz，用于降低高深宽比孔的电荷积累。"
+    }
+  ],
+  "labels": { "decision": "direct", "topics": ["RF/射频"] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "article",
+      "summary": "合成：脉冲射频 1 kHz 降低电荷积累。",
+      "domains": ["etching", "rf"]
+    },
+    "verdict": {
+      "decision": "direct",
+      "confidence": "medium",
+      "reasons": ["脉冲射频用于高深宽比孔刻蚀"],
+      "block_references": [
+        { "block_id": "b001", "quote": "脉冲射频电源工作在 1 kHz" }
+      ]
+    },
+    "extraction": {
+      "claims": [
+        {
+          "text": "脉冲射频电源工作在 1 kHz",
+          "kind": "source_statement",
+          "attribution": "合成笔记",
+          "conditions": ["高深宽比孔"],
+          "evidence": [
+            {
+              "block_id": "b001",
+              "exact_quote": "脉冲射频电源工作在 1 kHz",
+              "relation": "supports"
+            }
+          ]
+        }
+      ],
+      "limitations": ["合成样本"]
+    }
+  }
+}

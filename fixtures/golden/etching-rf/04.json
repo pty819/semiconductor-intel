@@ -1,0 +1,47 @@
+{
+  "id": "rf-04",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成：5 kW 射频发生器",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成规格：新刻蚀机台配备 5 kW 射频发生器，源功率与偏压功率分通道输出。"
+    }
+  ],
+  "labels": { "decision": "direct", "topics": ["RF/射频"] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "announcement",
+      "summary": "合成：刻蚀机台 5 kW 射频发生器分通道输出。",
+      "domains": ["etching", "rf"]
+    },
+    "verdict": {
+      "decision": "direct",
+      "confidence": "high",
+      "reasons": ["刻蚀机台射频发生器规格"],
+      "block_references": [
+        { "block_id": "b001", "quote": "配备 5 kW 射频发生器" }
+      ]
+    },
+    "extraction": {
+      "claims": [
+        {
+          "text": "新刻蚀机台配备 5 kW 射频发生器",
+          "kind": "source_statement",
+          "attribution": "合成规格",
+          "conditions": [],
+          "evidence": [
+            {
+              "block_id": "b001",
+              "exact_quote": "配备 5 kW 射频发生器",
+              "relation": "supports"
+            }
+          ]
+        }
+      ],
+      "limitations": ["合成样本"]
+    }
+  }
+}

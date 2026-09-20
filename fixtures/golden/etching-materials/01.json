@@ -1,0 +1,47 @@
+{
+  "id": "mat-01",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成：SiO2 硬掩模选择比",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成报告：对多晶硅刻蚀时 SiO2 硬掩模选择比达到 20:1，条件为低偏压。"
+    }
+  ],
+  "labels": { "decision": "direct", "topics": ["材料选择"] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "article",
+      "summary": "合成：多晶硅刻蚀 SiO2 硬掩模选择比 20:1。",
+      "domains": ["etching", "materials"]
+    },
+    "verdict": {
+      "decision": "direct",
+      "confidence": "high",
+      "reasons": ["硬掩模材料与刻蚀选择比"],
+      "block_references": [
+        { "block_id": "b001", "quote": "SiO2 硬掩模选择比达到 20:1" }
+      ]
+    },
+    "extraction": {
+      "claims": [
+        {
+          "text": "对多晶硅刻蚀时 SiO2 硬掩模选择比达到 20:1",
+          "kind": "source_statement",
+          "attribution": "合成报告",
+          "conditions": ["低偏压"],
+          "evidence": [
+            {
+              "block_id": "b001",
+              "exact_quote": "SiO2 硬掩模选择比达到 20:1",
+              "relation": "supports"
+            }
+          ]
+        }
+      ],
+      "limitations": ["合成样本"]
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "id": "mat-02",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成：193 nm 光刻胶用于刻蚀",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成笔记：193 nm 光刻胶在氟基等离子体中的刻蚀速率约为 80 nm/min。"
+    }
+  ],
+  "labels": { "decision": "direct", "topics": ["材料选择"] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "article",
+      "summary": "合成：193 nm 光刻胶在氟基等离子体中的刻蚀速率。",
+      "domains": ["etching", "materials"]
+    },
+    "verdict": {
+      "decision": "direct",
+      "confidence": "high",
+      "reasons": ["光刻胶材料在刻蚀等离子体中的表现"],
+      "block_references": [
+        { "block_id": "b001", "quote": "193 nm 光刻胶在氟基等离子体中的刻蚀速率约为 80 nm/min" }
+      ]
+    },
+    "extraction": {
+      "claims": [
+        {
+          "text": "193 nm 光刻胶在氟基等离子体中的刻蚀速率约为 80 nm/min",
+          "kind": "source_statement",
+          "attribution": "合成笔记",
+          "conditions": ["氟基等离子体"],
+          "evidence": [
+            {
+              "block_id": "b001",
+              "exact_quote": "193 nm 光刻胶在氟基等离子体中的刻蚀速率约为 80 nm/min",
+              "relation": "supports"
+            }
+          ]
+        }
+      ],
+      "limitations": ["合成样本"]
+    }
+  }
+}

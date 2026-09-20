@@ -1,0 +1,47 @@
+{
+  "id": "oes-02",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成：机器学习 OES 终点",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成论文摘要：监督模型根据 OES 时间序列判断介质刻蚀终点，准确率报告为 96%。"
+    }
+  ],
+  "labels": { "decision": "direct", "topics": ["OES 监控算法"] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "paper",
+      "summary": "合成：监督模型用 OES 序列判断刻蚀终点。",
+      "domains": ["etching", "oes", "algorithm"]
+    },
+    "verdict": {
+      "decision": "direct",
+      "confidence": "high",
+      "reasons": ["OES 监控算法用于刻蚀终点"],
+      "block_references": [
+        { "block_id": "b001", "quote": "根据 OES 时间序列判断介质刻蚀终点" }
+      ]
+    },
+    "extraction": {
+      "claims": [
+        {
+          "text": "监督模型根据 OES 时间序列判断介质刻蚀终点，准确率报告为 96%",
+          "kind": "source_statement",
+          "attribution": "合成论文摘要",
+          "conditions": [],
+          "evidence": [
+            {
+              "block_id": "b001",
+              "exact_quote": "根据 OES 时间序列判断介质刻蚀终点",
+              "relation": "supports"
+            }
+          ]
+        }
+      ],
+      "limitations": ["合成样本"]
+    }
+  }
+}

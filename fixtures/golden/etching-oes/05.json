@@ -1,0 +1,33 @@
+{
+  "id": "oes-05",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成不确定例：天文台光学发射光谱",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成科普：天文台用光学发射光谱观察星云，文中未提及半导体刻蚀腔体。"
+    }
+  ],
+  "labels": { "decision": "uncertain", "topics": [] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "article",
+      "summary": "合成：天文光学发射光谱，未明确刻蚀联系。",
+      "domains": ["astronomy"]
+    },
+    "verdict": {
+      "decision": "uncertain",
+      "confidence": "low",
+      "reasons": ["光学发射光谱一词出现，但场景是天文台"],
+      "block_references": [
+        { "block_id": "b001", "quote": "文中未提及半导体刻蚀腔体" }
+      ]
+    },
+    "extraction": {
+      "claims": [],
+      "limitations": ["不确定例，不抽取刻蚀主张"]
+    }
+  }
+}

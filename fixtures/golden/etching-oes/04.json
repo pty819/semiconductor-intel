@@ -1,0 +1,47 @@
+{
+  "id": "oes-04",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成：双波长 OES 监测 CF2",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成实验：双波长 OES 同时监测 CF2 分子带与氩线，用于氟碳等离子体配比控制。"
+    }
+  ],
+  "labels": { "decision": "direct", "topics": ["OES 监控算法"] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "article",
+      "summary": "合成：双波长 OES 监测 CF2 与氩线。",
+      "domains": ["etching", "oes"]
+    },
+    "verdict": {
+      "decision": "direct",
+      "confidence": "high",
+      "reasons": ["OES 用于氟碳等离子体监控"],
+      "block_references": [
+        { "block_id": "b001", "quote": "双波长 OES 同时监测 CF2 分子带与氩线" }
+      ]
+    },
+    "extraction": {
+      "claims": [
+        {
+          "text": "双波长 OES 同时监测 CF2 分子带与氩线",
+          "kind": "source_statement",
+          "attribution": "合成实验",
+          "conditions": ["氟碳等离子体配比控制"],
+          "evidence": [
+            {
+              "block_id": "b001",
+              "exact_quote": "双波长 OES 同时监测 CF2 分子带与氩线",
+              "relation": "supports"
+            }
+          ]
+        }
+      ],
+      "limitations": ["合成样本"]
+    }
+  }
+}

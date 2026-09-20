@@ -1,0 +1,47 @@
+{
+  "id": "mat-04",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成：HfO2 作为刻蚀停止层",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成实验：高介电常数 HfO2 薄膜被用作栅极刻蚀停止层，厚度 3 nm。"
+    }
+  ],
+  "labels": { "decision": "direct", "topics": ["材料选择"] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "article",
+      "summary": "合成：HfO2 薄膜作栅极刻蚀停止层。",
+      "domains": ["etching", "materials"]
+    },
+    "verdict": {
+      "decision": "direct",
+      "confidence": "medium",
+      "reasons": ["高k材料用于刻蚀停止层"],
+      "block_references": [
+        { "block_id": "b001", "quote": "HfO2 薄膜被用作栅极刻蚀停止层" }
+      ]
+    },
+    "extraction": {
+      "claims": [
+        {
+          "text": "高介电常数 HfO2 薄膜被用作栅极刻蚀停止层",
+          "kind": "source_statement",
+          "attribution": "合成实验",
+          "conditions": ["厚度 3 nm"],
+          "evidence": [
+            {
+              "block_id": "b001",
+              "exact_quote": "HfO2 薄膜被用作栅极刻蚀停止层",
+              "relation": "supports"
+            }
+          ]
+        }
+      ],
+      "limitations": ["合成样本"]
+    }
+  }
+}

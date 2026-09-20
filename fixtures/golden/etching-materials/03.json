@@ -1,0 +1,47 @@
+{
+  "id": "mat-03",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成：腔体衬里改为 Y2O3",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成公告：刻蚀腔体衬里材料由氧化铝改为 Y2O3 陶瓷，以降低金属污染。"
+    }
+  ],
+  "labels": { "decision": "direct", "topics": ["材料选择"] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "announcement",
+      "summary": "合成：腔体衬里改为 Y2O3 陶瓷。",
+      "domains": ["etching", "materials"]
+    },
+    "verdict": {
+      "decision": "direct",
+      "confidence": "high",
+      "reasons": ["刻蚀腔体衬里材料更换"],
+      "block_references": [
+        { "block_id": "b001", "quote": "由氧化铝改为 Y2O3 陶瓷" }
+      ]
+    },
+    "extraction": {
+      "claims": [
+        {
+          "text": "刻蚀腔体衬里材料由氧化铝改为 Y2O3 陶瓷",
+          "kind": "source_statement",
+          "attribution": "合成公告",
+          "conditions": [],
+          "evidence": [
+            {
+              "block_id": "b001",
+              "exact_quote": "由氧化铝改为 Y2O3 陶瓷",
+              "relation": "supports"
+            }
+          ]
+        }
+      ],
+      "limitations": ["合成样本"]
+    }
+  }
+}

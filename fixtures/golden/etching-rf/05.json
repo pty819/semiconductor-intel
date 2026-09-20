@@ -1,0 +1,33 @@
+{
+  "id": "rf-05",
+  "synthetic": true,
+  "notice": "合成样本，不是科学或供应商事实",
+  "title": "合成难负例：调频广播电台搬迁",
+  "industry_profile": "半导体干法刻蚀相关设备、工艺、材料和监控研究",
+  "blocks": [
+    {
+      "block_id": "b001",
+      "text": "合成社会新闻：本市调频广播电台将发射功率调整到 5 kW，与半导体工艺无关。"
+    }
+  ],
+  "labels": { "decision": "unrelated", "topics": [] },
+  "scripted": {
+    "digest": {
+      "doc_kind": "article",
+      "summary": "合成：调频广播电台发射功率调整，非刻蚀。",
+      "domains": ["broadcast"]
+    },
+    "verdict": {
+      "decision": "unrelated",
+      "confidence": "high",
+      "reasons": ["广播电台而非刻蚀射频电源"],
+      "block_references": [
+        { "block_id": "b001", "quote": "与半导体工艺无关" }
+      ]
+    },
+    "extraction": {
+      "claims": [],
+      "limitations": ["难负例，不应抽取刻蚀主张"]
+    }
+  }
+}
