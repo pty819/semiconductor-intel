@@ -3,9 +3,9 @@
 Static, DB-free gates for Tasks 2 and 3:
 
 - The exact table manifest (21 core tables in 0001 + 54 knowledge/
-  conversation/jobs/generation tables in 0002) exists in BOTH
-  ``Base.metadata`` and the ``op.create_table`` calls of the migration
-  files (parsed from source).
+  conversation/jobs/generation tables in 0002 + the index_generation
+  registry in 0003) exists in BOTH ``Base.metadata`` and the
+  ``op.create_table`` calls of the migration files (parsed from source).
 - Scope classification agrees everywhere: auth/G tables carry no RLS; the
   O/I tables (owner-only predicate for the 0002 O/I hybrids) all get
   ENABLE+FORCE and a ``TO intel_app`` policy.
@@ -36,6 +36,7 @@ MIGRATIONS_DIR = REPO_ROOT / "migrations" / "versions"
 MIGRATION_FILES = {
     "0001_core_tables.py": MIGRATIONS_DIR / "0001_core_tables.py",
     "0002_knowledge_tables.py": MIGRATIONS_DIR / "0002_knowledge_tables.py",
+    "0003_index_generation.py": MIGRATIONS_DIR / "0003_index_generation.py",
 }
 
 # The 21 core tables from Task 2 / spec 03 §2-§3.
@@ -131,7 +132,11 @@ TASK3_TABLES = {
     "output_generations",
 }
 
-EXPECTED_TABLES = TASK2_TABLES | TASK3_TABLES
+# The index_generation registry (Task 10 / spec 03 §8): one INSERT-only
+# O-scope table created by 0003 alongside the retrieval indexes.
+TASK4_TABLES = {"index_generation"}
+
+EXPECTED_TABLES = TASK2_TABLES | TASK3_TABLES | TASK4_TABLES
 
 RLS_TABLES_EXPECTED = EXPECTED_TABLES - {
     "users",
@@ -163,6 +168,8 @@ INDUSTRY_TABLES_EXPECTED = RLS_TABLES_EXPECTED - {
     "model_runs",
     "coverage_batches",
     "audit_log",
+    # 0003 owner-predicate table
+    "index_generation",
 }
 
 VERSION_TABLES = {
@@ -190,6 +197,7 @@ APPEND_ONLY_TABLES = {
     "event_merge_operations",
     "event_lifecycle_history",
     "job_events",
+    "index_generation",
 }
 
 # Pure link tables (spec 03 §1 例外: 复合主键, no common columns).
@@ -208,9 +216,7 @@ PURE_LINK_TABLES = {
     "generation_run_models",
 }
 
-NO_MUTABILITY_TABLES = (
-    set(VERSION_TABLES) | APPEND_ONLY_TABLES | PURE_LINK_TABLES
-)
+NO_MUTABILITY_TABLES = set(VERSION_TABLES) | APPEND_ONLY_TABLES | PURE_LINK_TABLES
 
 
 def _load_migration_module(name: str):
@@ -262,9 +268,7 @@ def _migration_sql_tables(sql: str) -> dict[str, tuple[set[str], set[str]]]:
         out[name] = (cols, cons)
     # 0002 adds circular/deferred FKs (and repairs 0001's use_alter ones)
     # via ALTER TABLE ... ADD CONSTRAINT — count them per table.
-    for table, constraint in re.findall(
-        r"ALTER TABLE (\w+) ADD CONSTRAINT (\w+)", sql
-    ):
+    for table, constraint in re.findall(r"ALTER TABLE (\w+) ADD CONSTRAINT (\w+)", sql):
         if table in out:
             cols, cons = out[table]
             out[table] = (cols, cons | {constraint})
@@ -286,16 +290,17 @@ class TestTableManifest:
         assert set(ALL_TABLES) == set(Base.metadata.tables) == EXPECTED_TABLES
 
     def test_migration_files_declare_exactly_their_tables(self) -> None:
-        per_file = {"0001_core_tables.py": TASK2_TABLES,
-                    "0002_knowledge_tables.py": TASK3_TABLES}
+        per_file = {
+            "0001_core_tables.py": TASK2_TABLES,
+            "0002_knowledge_tables.py": TASK3_TABLES,
+            "0003_index_generation.py": TASK4_TABLES,
+        }
         for name, expected in per_file.items():
             source = MIGRATION_FILES[name].read_text()
             declared = set(re.findall(r'op\.create_table\(\s*\n?\s*"(\w+)"', source))
             # 0002 builds its uniform §9 link/citation tables via helpers.
             declared |= set(
-                re.findall(
-                    r'(?:_link_table|_citation_table)\(\s*\n?\s*"(\w+)"', source
-                )
+                re.findall(r'(?:_link_table|_citation_table)\(\s*\n?\s*"(\w+)"', source)
             )
             assert declared == expected, name
             # No accidental extras (count guards regex blind spots). Literal
@@ -304,7 +309,9 @@ class TestTableManifest:
             # must not be counted twice).
             n_create = len(re.findall(r'op\.create_table\(\s*\n?\s*"', source))
             n_helper = len(
-                re.findall(r"^\s+(?:_link_table|_citation_table)\(", source, re.MULTILINE)
+                re.findall(
+                    r"^\s+(?:_link_table|_citation_table)\(", source, re.MULTILINE
+                )
             )
             assert n_create + n_helper == len(expected), (name, n_create, n_helper)
 
@@ -332,9 +339,7 @@ class TestScopeClassification:
             assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in sql, table
             assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in sql, table
             suffix = (
-                "industry_scope"
-                if table in INDUSTRY_TABLES_EXPECTED
-                else "owner_scope"
+                "industry_scope" if table in INDUSTRY_TABLES_EXPECTED else "owner_scope"
             )
             assert f"CREATE POLICY {table}_{suffix} ON {table} TO intel_app" in sql
         # auth/G tables must NOT get RLS.
@@ -372,8 +377,7 @@ class TestMigrationMatchesOrm:
 
         sql = _render_migration_sql()
         mig_idx = set(re.findall(r"CREATE (?:UNIQUE )?INDEX (\w+)", sql))
-        orm_idx = {ix.name for t in Base.metadata.tables.values()
-                   for ix in t.indexes}
+        orm_idx = {ix.name for t in Base.metadata.tables.values() for ix in t.indexes}
         assert mig_idx == orm_idx, (
             f"migration-only={sorted(mig_idx - orm_idx)} "
             f"orm-only={sorted(orm_idx - mig_idx)}"
@@ -480,6 +484,10 @@ class TestCommonColumnRules:
             elif name == "event_merge_operations":
                 # Spec 03 §9 names applied_at/undone_at, not recorded_at.
                 assert {"id", "applied_at"} <= cols, name
+            elif name == "index_generation":
+                # Spec 03 §8 concept: INSERT-only registry, created_at only.
+                assert {"id", "created_at"} <= cols, name
+                assert "recorded_at" not in cols, name
             else:
                 assert {"id", "recorded_at"} <= cols, name
 
@@ -556,10 +564,11 @@ class TestCommonColumnRules:
 
         table = Base.metadata.tables["output_generations"]
         checks = [
-            ck for ck in table.constraints
+            ck
+            for ck in table.constraints
             if ck.__class__.__name__ == "CheckConstraint"
-            and "num_nonnulls" in (ck.sqltext.text if hasattr(ck.sqltext, "text")
-                                   else str(ck.sqltext))
+            and "num_nonnulls"
+            in (ck.sqltext.text if hasattr(ck.sqltext, "text") else str(ck.sqltext))
         ]
         assert len(checks) == 1
 
@@ -601,3 +610,67 @@ class TestRlsHelper:
 
         assert OWNER_GUC == "app.owner_id"
         assert INDUSTRY_GUC == "app.industry_id"
+
+
+class TestRetrievalMigration0003:
+    """Task 10 gates on the rendered 0003 DDL (spec 03 §8, 04 §5/§6):
+
+    - extensions + jieba text search configuration are created defensively
+      (idempotent with deploy/nas/init/40-intel-extensions.sh);
+    - the BM25 index binds ``text_config='jieba'`` with k1/b from the
+      retrieval constants;
+    - the trigram GIN index serves the alias/phrase channel;
+    - NO vector index in the default generation — first version is exact
+      ordering; the diskann DDL is flag-gated and absent from the default
+      render (REC-08: switch only after the 98% golden-set gate).
+    """
+
+    def test_extensions_and_jieba_config_are_created_idempotently(self) -> None:
+        sql = _render_migration_sql()
+        for ext in ("vector", "vectorscale", "pg_textsearch", "pg_jieba", "pg_trgm"):
+            assert f"CREATE EXTENSION IF NOT EXISTS {ext}" in sql, ext
+        assert (
+            "CREATE TEXT SEARCH CONFIGURATION IF NOT EXISTS jieba"
+            " (PARSER = jieba)" in sql
+        )
+        # Mapping is re-applied idempotently (drop-if-exists first), so the
+        # migration is safe on databases the init script already configured.
+        assert "ALTER TEXT SEARCH CONFIGURATION jieba DROP MAPPING IF EXISTS" in sql
+        assert (
+            "ALTER TEXT SEARCH CONFIGURATION jieba ADD MAPPING"
+            " FOR n, v, a, i, e, l WITH simple" in sql
+        )
+
+    def test_bm25_index_binds_jieba_config_and_constants(self) -> None:
+        from intel.retrieval.bm25 import BM25_B, BM25_K1
+
+        sql = _render_migration_sql()
+        assert "CREATE INDEX ix_chunks_text_bm25 ON chunks USING bm25 (text)" in sql
+        assert "text_config = 'jieba'" in sql
+        assert f"k1 = '{BM25_K1}'" in sql
+        assert f"b = '{BM25_B}'" in sql
+
+    def test_trigram_gin_index_on_normalized_terms(self) -> None:
+        sql = _render_migration_sql()
+        assert (
+            "CREATE INDEX ix_chunks_normalized_terms_trgm ON chunks"
+            " USING gin (normalized_terms gin_trgm_ops)" in sql
+        )
+
+    def test_no_vector_index_in_default_generation(self) -> None:
+        sql = _render_migration_sql()
+        # diskann DDL exists as a flag-gated helper only; the default render
+        # must not create any vector index (exact ordering is the v1 path).
+        assert "diskann" not in sql.lower()
+        assert "USING diskann" not in sql
+
+    def test_diskann_generation_sql_is_available_for_joint_debugging(self) -> None:
+        module = _load_migration_module("0003_index_generation.py")
+        stmts = module.diskann_generation_sql()
+        joined = "\n".join(stmts)
+        # Verified pgvectorscale syntax (Task 9): diskann + cosine ops.
+        assert "USING diskann (embedding vector_cosine_ops)" in joined
+        # Spec 03 §8: diskann build memory ~2x table size — the ops
+        # runbook's build step raises maintenance_work_mem off-peak.
+        assert "maintenance_work_mem" in joined
+        assert module.DISKANN_CREATE_FLAG == "INTEL_CREATE_DISKANN"

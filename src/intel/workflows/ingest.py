@@ -69,6 +69,8 @@ from intel.repositories.pool import (
     SourceRunRecord,
     SqlAlchemyPoolRepository,
 )
+from intel.retrieval.chunker import CHUNKER_VERSION
+from intel.retrieval.indexer import NOOP_EMBEDDING_VERSION
 from intel.services.errors import ValidationFailed
 from intel.services.jobs import JobService, build_idempotency_key
 from intel.sources.adapters import make_adapter, validate_adapter_config
@@ -636,10 +638,12 @@ async def _persist_capture(
 # parse
 # --------------------------------------------------------------------------
 
-#: Placeholder versions for the index job's idempotency key; Task 10
-#: owns the chunker/embedding handlers and replaces these constants.
-INDEX_CHUNKER_VERSION = "chunker@1"
-INDEX_EMBEDDING_VERSION = "embed@1"
+#: Retrieval-stack versions stamped into the index job's idempotency key —
+#: the chunker that segments blocks and the embedding client the index
+#: handler runs with (the noop client until Task 11 wires the L1 route;
+#: either way the version rides the key, so a version bump re-indexes).
+INDEX_CHUNKER_VERSION = CHUNKER_VERSION
+INDEX_EMBEDDING_VERSION = NOOP_EMBEDDING_VERSION
 
 #: Soft cap on flags echoed into job progress (observability only).
 _MAX_PROGRESS_FLAGS = 20
@@ -736,9 +740,11 @@ def make_parse_handler(wiring: IngestWiring) -> JobHandler:
             if created:
                 await _persist_diffs(txn, ctx, capture_id, record, artifact)
                 if artifact.parse_status in ("ok", "partial"):
-                    # Task 10 owns the index handler; until it registers,
-                    # the runner's default handler marks these succeeded
-                    # with a note (Task 6 convention — observable queue).
+                    # The index handler (retrieval.indexer.register_index_
+                    # handlers) is attached by the composition root; until
+                    # that wiring lands the runner's default handler marks
+                    # these succeeded with a note (Task 6 convention —
+                    # observable queue).
                     await jobs_service.enqueue(
                         txn.jobs,
                         ctx.scope,

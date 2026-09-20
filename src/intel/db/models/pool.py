@@ -413,6 +413,29 @@ class Chunk(OwnerScopeMixin, UUIDPrimaryKey, TimestampMixin, Base):
         ),
         # chunks 按 owner+parse 过滤 (spec 03 §8).
         Index("ix_chunks_owner_parse", "owner_id", "parsed_artifact_id"),
+        # BM25 over the chunk text (spec 03 §8 / 04 §5): pg_textsearch with
+        # the jieba text search configuration. k1/b are duplicated from
+        # intel.retrieval.bm25 (importing it here would be circular —
+        # bm25 imports the models); tests/unit/test_retrieval_sql.py pins
+        # both sides to the same values, and migration 0003 renders the
+        # matching DDL.
+        Index(
+            "ix_chunks_text_bm25",
+            "text",
+            postgresql_using="bm25",
+            postgresql_with={
+                "text_config": "jieba",
+                "k1": 1.5,
+                "b": 0.75,
+            },
+        ),
+        # Trigram GIN for the alias/短语-精确复查 channel (spec 03 §8).
+        Index(
+            "ix_chunks_normalized_terms_trgm",
+            "normalized_terms",
+            postgresql_using="gin",
+            postgresql_ops={"normalized_terms": "gin_trgm_ops"},
+        ),
     )
 
 

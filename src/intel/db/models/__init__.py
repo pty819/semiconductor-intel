@@ -6,7 +6,8 @@ Scope classification (spec 03 §1):
 - O (RLS on app.owner_id): industries, industry_revisions, owner_feeds,
   source_runs, discovery_items, blobs, documents, document_origins,
   captures, fetch_observations, parsed_artifacts, document_diffs, chunks,
-  processing_decisions, api_idempotency
+  processing_decisions, api_idempotency, index_generation (0003, INSERT-only
+  retrieval-config registry)
 - O/I hybrids (nullable industry_id, RLS on app.owner_id only — kind-level
   scoping, spec 03 §7): jobs, job_steps, job_events, model_runs,
   coverage_batches, audit_log
@@ -89,6 +90,7 @@ from intel.db.models.pool import (
     ParsedArtifact,
     ProcessingDecision,
 )
+from intel.db.models.retrieval import IndexGeneration
 from intel.db.models.sources import (
     IndustrySource,
     OwnerFeed,
@@ -130,6 +132,8 @@ RLS_OWNER_TABLES = (
     "model_runs",
     "coverage_batches",
     "audit_log",
+    # 0003: retrieval index_generation registry (INSERT-only)
+    "index_generation",
 )
 RLS_INDUSTRY_TABLES = (
     # 0001 I tables
@@ -240,6 +244,7 @@ __all__ = [
     "FetchObservation",
     "GenerationRun",
     "GenerationRunModel",
+    "IndexGeneration",
     "Industry",
     "IndustryDocument",
     "IndustryRevision",
