@@ -1,6 +1,6 @@
 """BM25 channel: pg_textsearch ``<@>`` with jieba tokenization (spec 04 §6 B2).
 
-Verified upstream facts (Task 9, deploy/nas/README.md):
+Verified upstream facts (Task 9, deploy/postgres/README.md):
 
 - index DDL: ``CREATE INDEX ... ON chunks USING bm25 (text) WITH
   (text_config='jieba', k1=..., b=...)`` — the ``jieba`` text search

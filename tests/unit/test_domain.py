@@ -78,7 +78,9 @@ class TestNormalizeUrl:
         assert normalize_url("https://example.com:/a") == "https://example.com/a"
 
     def test_non_default_port_preserved(self) -> None:
-        assert normalize_url("https://example.com:8443/a") == "https://example.com:8443/a"
+        assert (
+            normalize_url("https://example.com:8443/a") == "https://example.com:8443/a"
+        )
 
     def test_scheme_mismatched_port_preserved(self) -> None:
         # :80 is only the default for http, not https — must survive.
@@ -115,19 +117,29 @@ class TestNormalizeUrl:
     def test_spec_04_3_examples(self) -> None:
         # The exact pair used by the spec: ?utm_source=x is deleted,
         # ?lang=zh survives.
-        assert normalize_url("https://example.com/p?utm_source=x") == "https://example.com/p"
-        assert normalize_url("https://example.com/p?lang=zh") == "https://example.com/p?lang=zh"
+        assert (
+            normalize_url("https://example.com/p?utm_source=x")
+            == "https://example.com/p"
+        )
+        assert (
+            normalize_url("https://example.com/p?lang=zh")
+            == "https://example.com/p?lang=zh"
+        )
 
     def test_param_order_stable_no_sorting(self) -> None:
         # Deletion only: the relative order of surviving params is the input
         # order — the output is NOT re-sorted alphabetically.
         assert (
-            normalize_url("https://example.com/p?beta=2&alpha=1&utm_source=promo&gamma=3")
+            normalize_url(
+                "https://example.com/p?beta=2&alpha=1&utm_source=promo&gamma=3"
+            )
             == "https://example.com/p?beta=2&alpha=1&gamma=3"
         )
 
     def test_query_dropped_when_only_tracking_params(self) -> None:
-        assert normalize_url("https://example.com/p?fbclid=abc") == "https://example.com/p"
+        assert (
+            normalize_url("https://example.com/p?fbclid=abc") == "https://example.com/p"
+        )
 
     def test_tracking_match_is_case_insensitive(self) -> None:
         assert (
@@ -141,11 +153,15 @@ class TestNormalizeUrl:
             normalize_url("https://example.com/p?q=a%20b&lang=zh")
             == "https://example.com/p?q=a%20b&lang=zh"
         )
-        assert normalize_url("https://example.com/p?q=a+b") == "https://example.com/p?q=a+b"
+        assert (
+            normalize_url("https://example.com/p?q=a+b")
+            == "https://example.com/p?q=a+b"
+        )
 
     def test_userinfo_preserved_host_lowercased(self) -> None:
         assert (
-            normalize_url("https://user:pw@Example.com/x") == "https://user:pw@example.com/x"
+            normalize_url("https://user:pw@Example.com/x")
+            == "https://user:pw@example.com/x"
         )
 
     def test_idempotent(self) -> None:
@@ -246,15 +262,35 @@ class TestTimeValueBounds:
     @pytest.mark.parametrize(
         ("kwargs", "match"),
         [
-            ({"precision": "unknown", "start": datetime(2026, 1, 1, tzinfo=UTC)},
-             "fabricated bounds"),
-            ({"precision": "instant", "start": datetime(2026, 1, 1, tzinfo=UTC),
-              "end": datetime(2026, 1, 2, tzinfo=UTC)}, "start only"),
+            (
+                {"precision": "unknown", "start": datetime(2026, 1, 1, tzinfo=UTC)},
+                "fabricated bounds",
+            ),
+            (
+                {
+                    "precision": "instant",
+                    "start": datetime(2026, 1, 1, tzinfo=UTC),
+                    "end": datetime(2026, 1, 2, tzinfo=UTC),
+                },
+                "start only",
+            ),
             ({"precision": "day", "start": None}, "requires start"),
-            ({"precision": "range", "start": datetime(2026, 1, 2, tzinfo=UTC),
-              "end": datetime(2026, 1, 2, tzinfo=UTC)}, "nonempty half-open"),
-            ({"precision": "range", "start": datetime(2026, 1, 3, tzinfo=UTC),
-              "end": datetime(2026, 1, 2, tzinfo=UTC)}, "nonempty half-open"),
+            (
+                {
+                    "precision": "range",
+                    "start": datetime(2026, 1, 2, tzinfo=UTC),
+                    "end": datetime(2026, 1, 2, tzinfo=UTC),
+                },
+                "nonempty half-open",
+            ),
+            (
+                {
+                    "precision": "range",
+                    "start": datetime(2026, 1, 3, tzinfo=UTC),
+                    "end": datetime(2026, 1, 2, tzinfo=UTC),
+                },
+                "nonempty half-open",
+            ),
         ],
     )
     def test_invalid_timevalues_raise_in_dto(self, kwargs: dict, match: str) -> None:
@@ -281,7 +317,9 @@ class TestTimeValueBounds:
 @pytest.fixture()
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in list(os.environ):
-        if name.upper().startswith(("INTEL_", "GROK2API")):
+        if name.upper().startswith(
+            ("INTEL_", "GROK2API", "LLM_API_KEY", "LLM_BASE_URL")
+        ):
             monkeypatch.delenv(name, raising=False)
 
 
@@ -291,8 +329,8 @@ class TestSettings:
         assert s.database_url == "postgresql+asyncpg://intel:intel@localhost:5432/intel"
         assert s.object_store_root == Path("var/objects")
         assert s.session_pepper  # non-empty dev default
-        assert s.grok2api_base_url == "http://192.168.1.21:8000/v1"
-        assert s.grok2api_key == ""
+        assert s.llm_base_url == "http://192.168.1.21:8000/v1"
+        assert s.llm_api_key == ""
         assert s.llm_concurrency == 4
         assert s.fetch_concurrency == 8
         assert s.search_backfill_days == 90
@@ -302,30 +340,48 @@ class TestSettings:
         assert s.diskann_query_rescore > 0
         assert s.route_aliases == {"L1": "L1", "L2": "L2", "L3": "L3"}
 
-    def test_env_override_with_intel_prefix(self, clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_env_override_with_intel_prefix(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv("INTEL_LLM_CONCURRENCY", "7")
         monkeypatch.setenv("INTEL_SEARCH_BACKFILL_DAYS", "30")
         assert Settings(_env_file=None).llm_concurrency == 7
         assert Settings(_env_file=None).search_backfill_days == 30
 
-    def test_route_aliases_from_env_json(self, clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_route_aliases_from_env_json(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv(
             "INTEL_ROUTE_ALIASES", '{"L1": "cheap-fast", "L2": "mid", "L3": "deep"}'
         )
         s = Settings(_env_file=None)
         assert s.route_aliases == {"L1": "cheap-fast", "L2": "mid", "L3": "deep"}
 
-    def test_grok2api_prefixed_alias(self, clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_llm_prefixed_alias(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("INTEL_LLM_BASE_URL", "http://elsewhere:9/v1")
+        monkeypatch.setenv("INTEL_LLM_API_KEY", "sk-x")
+        s = Settings(_env_file=None)
+        assert s.llm_base_url == "http://elsewhere:9/v1"
+        assert s.llm_api_key == "sk-x"
+
+    def test_grok2api_prefixed_alias_still_accepted(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Legacy env spellings keep older .env files working.
         monkeypatch.setenv("INTEL_GROK2API_BASE_URL", "http://elsewhere:9/v1")
         monkeypatch.setenv("INTEL_GROK2API_KEY", "sk-x")
         s = Settings(_env_file=None)
-        assert s.grok2api_base_url == "http://elsewhere:9/v1"
-        assert s.grok2api_key == "sk-x"
+        assert s.llm_base_url == "http://elsewhere:9/v1"
+        assert s.llm_api_key == "sk-x"
 
-    def test_grok2api_legacy_unprefixed_alias(self, clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_grok2api_legacy_unprefixed_alias(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # The .env.example written in Task 0 uses unprefixed GROK2API_*.
         monkeypatch.setenv("GROK2API_BASE_URL", "http://legacy:1/v1")
         monkeypatch.setenv("GROK2API_KEY", "sk-legacy")
         s = Settings(_env_file=None)
-        assert s.grok2api_base_url == "http://legacy:1/v1"
-        assert s.grok2api_key == "sk-legacy"
+        assert s.llm_base_url == "http://legacy:1/v1"
+        assert s.llm_api_key == "sk-legacy"

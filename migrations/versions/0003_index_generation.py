@@ -3,8 +3,8 @@
 Task 10's migration, on top of 0001/0002:
 
 - The retrieval extensions, created defensively (IF NOT EXISTS): they are
-  preinstalled in the deploy image (deploy/nas/Containerfile) and also
-  configured by deploy/nas/init/40-intel-extensions.sh — every path must
+  preinstalled in the deploy image (deploy/postgres/Containerfile) and also
+  configured by deploy/postgres/init/40-intel-extensions.sh — every path must
   be re-runnable against a database the other one already set up.
 - The ``jieba`` text search configuration (parser ``jieba`` from pg_jieba,
   tokens mapped to the ``simple`` dictionary) — the D13 custom

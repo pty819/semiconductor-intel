@@ -1,11 +1,21 @@
-# NAS Postgres Deployment (`semiconductor-intel-pg`)
+# Postgres Deployment (`semiconductor-intel-pg`)
 
-Postgres 18 container for semiconductor-intel, built and run on the NAS
-(`liyifan@192.168.1.21`, Armbian 26.8.3 aarch64, podman 5.7.0, 7.7 GB RAM,
-~48 GB free on `/`). It carries the four retrieval extensions selected in
-design D13/D14: BM25 full-text search over jieba-segmented Chinese
-(pg_textsearch + pg_jieba) and vector search (pgvector + pgvectorscale
-diskann).
+Postgres 18 container for semiconductor-intel, built and run on ANY
+podman host over ssh — the Containerfile is arch-agnostic (all four
+extensions build from source on both aarch64 and x86_64). Tested
+targets:
+
+| Host | Notes |
+|---|---|
+| NAS `liyifan@192.168.1.21` | Armbian 26.8.3 aarch64, podman 5.7.0, 7.7 GB RAM. Host port 5432 is taken by a host-level service → publish 5433. Build is slow (Rust on weak ARM). |
+| x86 `192.168.1.82` | Faster builds; use the default 5432 unless something listens. |
+
+It carries the four retrieval extensions selected in design D13/D14:
+BM25 full-text search over jieba-segmented Chinese (pg_textsearch +
+pg_jieba) and vector search (pgvector + pgvectorscale diskann). Note:
+images are native-arch — an x86-built image does not run on the aarch64
+NAS; build on the host that will run the container (or add `--arch`
+cross-building later if needed).
 
 Per the task ruling these artifacts are **written now, executed during 联调**
 (`先把代码写完`): nothing here has been built or run against the NAS yet.
@@ -16,9 +26,16 @@ Per the task ruling these artifacts are **written now, executed during 联调**
 |---|---|
 | `Containerfile` | postgres:18 base + source builds of the four extensions, build-dep cleanup in the same layer, initdb script baked in, `shared_preload_libraries` baked into CMD |
 | `init/40-intel-extensions.sh` | Runs once on first boot (empty PGDATA): `CREATE EXTENSION` x4 + `CREATE TEXT SEARCH CONFIGURATION jieba (PARSER = jieba)` + POS mapping |
-| `setup-nas.sh` | End-to-end deploy: remote dirs → scp build context → `podman build` → `podman run` → wait-for-ready → PASS/FAIL smoke checks |
+| `setup.sh` | End-to-end deploy: remote dirs → scp build context → `podman build` → `podman run` → wait-for-ready → PASS/FAIL smoke checks |
 
-Run with: `PG_PASSWORD=... ./deploy/nas/setup-nas.sh` (see `usage` inside).
+Run with (see `usage` inside for all knobs):
+
+```bash
+# NAS (aarch64), host port 5433:
+HOST_PORT=5433 PG_PASSWORD=... ./deploy/postgres/setup.sh
+# x86 server:
+HOST=liyifan@192.168.1.82 PG_PASSWORD=... ./deploy/postgres/setup.sh
+```
 
 ## Verified extension versions, licenses, sources
 

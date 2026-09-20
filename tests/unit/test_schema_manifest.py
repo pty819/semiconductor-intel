@@ -616,7 +616,7 @@ class TestRetrievalMigration0003:
     """Task 10 gates on the rendered 0003 DDL (spec 03 §8, 04 §5/§6):
 
     - extensions + jieba text search configuration are created defensively
-      (idempotent with deploy/nas/init/40-intel-extensions.sh);
+      (idempotent with deploy/postgres/init/40-intel-extensions.sh);
     - the BM25 index binds ``text_config='jieba'`` with k1/b from the
       retrieval constants;
     - the trigram GIN index serves the alias/phrase channel;

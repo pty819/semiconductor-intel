@@ -33,15 +33,26 @@ class Settings(BaseSettings):
     session_pepper: str = "dev-only-session-pepper-change-me"
 
     # -- model provider ----------------------------------------------------
-    # Accept both INTEL_GROK2API_* and the unprefixed GROK2API_* names kept
-    # by .env.example (case-insensitive env matching).
-    grok2api_base_url: str = Field(
+    # Any OpenAI-v1-compatible chat-completions endpoint (proxy, gateway,
+    # or direct). Env names, INTEL_-prefixed first; the legacy
+    # GROK2API_* spellings keep older .env files working.
+    llm_base_url: str = Field(
         default="http://192.168.1.21:8000/v1",
-        validation_alias=AliasChoices("intel_grok2api_base_url", "grok2api_base_url"),
+        validation_alias=AliasChoices(
+            "intel_llm_base_url",
+            "llm_base_url",
+            "intel_grok2api_base_url",
+            "grok2api_base_url",
+        ),
     )
-    grok2api_key: str = Field(
+    llm_api_key: str = Field(
         default="",
-        validation_alias=AliasChoices("intel_grok2api_key", "grok2api_key"),
+        validation_alias=AliasChoices(
+            "intel_llm_api_key",
+            "llm_api_key",
+            "intel_grok2api_key",
+            "grok2api_key",
+        ),
     )
 
     # -- runtime knobs (spec 10 §5 防失控配置) ------------------------------

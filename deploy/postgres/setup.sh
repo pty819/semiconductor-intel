@@ -1,41 +1,50 @@
 #!/usr/bin/env bash
-# setup-nas.sh — build and start the semiconductor-intel Postgres container
-# on the NAS (liyifan@192.168.1.21, Armbian aarch64, podman 5.7.0).
+# setup.sh — build and start the semiconductor-intel Postgres container on
+# ANY podman host over ssh. Arch-agnostic Containerfile; tested targets:
+#   - the NAS  (liyifan@192.168.1.21, Armbian aarch64, podman 5.7.0)
+#   - the x86 server (192.168.1.82) — faster builds, same image semantics
+# Select with HOST=... (or the legacy NAS_HOST=... spelling).
 #
-# Per the task ruling this script is WRITTEN now and EXECUTED during 联调:
-# it is the real thing — running it ssh's to the NAS, builds the image
-# (expect 30-60 min, dominated by the pgvectorscale Rust build) and starts
-# the container. No existing NAS container is touched:
+# Running it ssh's to the host, builds the image (30-60 min on the NAS,
+# much faster on x86 — dominated by the pgvectorscale Rust build) and
+# starts the container. On the NAS nothing existing is touched:
 #   postgres-server (pgduckdb, publishes no ports), redis, open-webui,
-#   grok2api (0.0.0.0:8000) — hands off all four.
+#   the LLM gateway (0.0.0.0:8000) — hands off all four.
 #
 # Rollback (removes the container; second line also wipes DB data):
-#   ssh liyifan@192.168.1.21 'podman rm -f semiconductor-intel-pg'
-#   ssh liyifan@192.168.1.21 'rm -rf ~/semiconductor-intel/pgdata/*'
+#   ssh <host> 'podman rm -f semiconductor-intel-pg'
+#   ssh <host> 'rm -rf ~/semiconductor-intel/pgdata/*'
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-NAS_HOST="${NAS_HOST:-liyifan@192.168.1.21}"
+HOST="${HOST:-${NAS_HOST:-liyifan@192.168.1.21}}"
 CONTAINER_NAME="${CONTAINER_NAME:-semiconductor-intel-pg}"
 IMAGE_TAG="${IMAGE_TAG:-semiconductor-intel-pg:18}"
 HOST_PORT="${HOST_PORT:-5432}"
 REMOTE_BASE="${REMOTE_BASE:-~/semiconductor-intel}"
-# Memory guard: the NAS has 7.7 GB total and already runs postgres-server,
-# redis, open-webui and grok2api. 5g leaves headroom for them and the OS;
-# tune via MEM_LIMIT=... setup-nas.sh (MEM_LIMIT=0 disables the cap).
+# Memory guard. The default (NAS) host has 7.7 GB total and already runs
+# postgres-server, redis, open-webui and the LLM gateway — 5g leaves
+# headroom for them and the OS. Raise freely on bigger x86 hosts;
+# MEM_LIMIT=0 disables the cap.
 MEM_LIMIT="${MEM_LIMIT:-5g}"
 
 usage() {
     cat <<'USAGE'
-Usage: PG_PASSWORD=... ./setup-nas.sh [-p <password>]
+Usage: PG_PASSWORD=... ./setup.sh [-p <password>] [HOST=...]
 
   -p <password>   Postgres superuser password (alternative to PG_PASSWORD env)
 
 Environment overrides:
-  NAS_HOST (liyifan@192.168.1.21)  CONTAINER_NAME (semiconductor-intel-pg)
-  IMAGE_TAG  (semiconductor-intel-pg:18)   HOST_PORT (5432)
-  REMOTE_BASE (~/semiconductor-intel)      MEM_LIMIT (5g)
+  HOST (liyifan@192.168.1.21; NAS_HOST accepted as the legacy spelling)
+  CONTAINER_NAME (semiconductor-intel-pg)  IMAGE_TAG (semiconductor-intel-pg:18)
+  HOST_PORT (5432)   REMOTE_BASE (~/semiconductor-intel)   MEM_LIMIT (5g)
+
+Examples:
+  # NAS (aarch64) — host port 5433 (5432 is taken by a host-level service):
+  HOST_PORT=5433 PG_PASSWORD=... ./setup.sh
+  # x86 server .82:
+  HOST=liyifan@192.168.1.82 PG_PASSWORD=... ./setup.sh
 USAGE
 }
 
@@ -59,23 +68,23 @@ fi
 
 # Run SQL on the container via stdin (keeps Chinese text out of nested quoting).
 psql_stdin() {
-    ssh "$NAS_HOST" "podman exec -i $CONTAINER_NAME psql -U postgres -d postgres -v ON_ERROR_STOP=1 -qAt"
+    ssh "$HOST" "podman exec -i $CONTAINER_NAME psql -U postgres -d postgres -v ON_ERROR_STOP=1 -qAt"
 }
 
 echo "== 1/6 prepare remote directories =="
-ssh "$NAS_HOST" "mkdir -p $REMOTE_BASE/{pgdata,objects,traces,build/init}"
+ssh "$HOST" "mkdir -p $REMOTE_BASE/{pgdata,objects,traces,build/init}"
 
 echo "== 2/6 copy build context (Containerfile + init script) =="
-scp -q "$SCRIPT_DIR/Containerfile" "$NAS_HOST:$REMOTE_BASE/build/Containerfile"
-scp -q "$SCRIPT_DIR/init/40-intel-extensions.sh" "$NAS_HOST:$REMOTE_BASE/build/init/40-intel-extensions.sh"
+scp -q "$SCRIPT_DIR/Containerfile" "$HOST:$REMOTE_BASE/build/Containerfile"
+scp -q "$SCRIPT_DIR/init/40-intel-extensions.sh" "$HOST:$REMOTE_BASE/build/init/40-intel-extensions.sh"
 
-port_state="$(ssh "$NAS_HOST" "ss -ltn 2>/dev/null | grep -c ':$HOST_PORT ' || true")"
+port_state="$(ssh "$HOST" "ss -ltn 2>/dev/null | grep -c ':$HOST_PORT ' || true")"
 if [[ "$port_state" != "0" ]]; then
     echo "WARN: something already listens on host port $HOST_PORT; the -p mapping below may fail"
 fi
 
-echo "== 3/6 podman build on the NAS (expect 30-60 min: pgvectorscale Rust/LTO) =="
-ssh "$NAS_HOST" "podman build -t $IMAGE_TAG $REMOTE_BASE/build"
+echo "== 3/6 podman build on $HOST (pgvectorscale Rust/LTO dominates the time)"
+ssh "$HOST" "podman build -t $IMAGE_TAG $REMOTE_BASE/build"
 
 echo "== 4/6 run container =="
 # Volume layout note: postgres:18 changed PGDATA to /var/lib/postgresql/18/docker
@@ -86,7 +95,7 @@ echo "== 4/6 run container =="
 # swap in a podman secret if that bothers you.
 # The image CMD already carries: -c shared_preload_libraries=pg_textsearch
 # (required by pg_textsearch; see Containerfile).
-ssh "$NAS_HOST" "podman run -d --name $CONTAINER_NAME --replace \
+ssh "$HOST" "podman run -d --name $CONTAINER_NAME --replace \
     -p $HOST_PORT:5432 \
     --memory=$MEM_LIMIT \
     -e POSTGRES_PASSWORD=$(printf '%q' "$PG_PASSWORD") \
@@ -99,7 +108,7 @@ echo "== 5/6 wait for postgres =="
 # pg_isready can answer "ready" against the temporary initdb server before the
 # init script finishes, so poll for the four extensions as the true-ready gate.
 deadline=$((SECONDS + 300))
-until ssh "$NAS_HOST" "podman exec $CONTAINER_NAME pg_isready -U postgres -d postgres" >/dev/null 2>&1; do
+until ssh "$HOST" "podman exec $CONTAINER_NAME pg_isready -U postgres -d postgres" >/dev/null 2>&1; do
     if (( SECONDS >= deadline )); then
         echo "FAIL: postgres not accepting connections within 300s; inspect with:"
         echo "  ssh $NAS_HOST 'podman logs $CONTAINER_NAME'"
@@ -192,4 +201,4 @@ if (( FAILURES > 0 )); then
     exit 1
 fi
 echo "RESULT: all smoke checks PASSED"
-echo "Connect with: postgresql+asyncpg://postgres:<PG_PASSWORD>@${NAS_HOST#*@}:$HOST_PORT/postgres"
+echo "Connect with: postgresql+asyncpg://postgres:<PG_PASSWORD>@${HOST#*@}:$HOST_PORT/postgres"

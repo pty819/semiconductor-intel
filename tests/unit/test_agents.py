@@ -3,7 +3,7 @@
 Offline:
 
 - the shipped routes.yaml loads into the unifiedllm registry with the
-  L1/L2/L3 tiers pointing at the grok2api endpoint and env-held key;
+  L1/L2/L3 tiers pointing at the OpenAI-v1 endpoint and env-held key;
 - tier route resolution is lazy, cached per agent, and honors
   Settings.route_aliases remapping;
 - scoped gateway tokens: sign/verify roundtrip, expiry, tampering,
@@ -74,12 +74,16 @@ def loaded_routes():
 
 
 class TestRoutesYaml:
-    def test_tiers_point_at_grok2api_with_env_key(self, loaded_routes) -> None:
+    def test_tiers_point_at_openai_v1_endpoint_with_env_key(
+        self, loaded_routes
+    ) -> None:
         for tier in ("L1", "L2", "L3"):
             entry = loaded_routes[tier]
-            assert entry["api_base"] == Settings().grok2api_base_url
-            assert entry["api_key_env"] == "GROK2API_KEY"
-            assert entry["model_name"].startswith("openai/grok-")
+            # Plain OpenAI-v1 semantics: one endpoint, env-held key,
+            # placeholder model ids an operator MUST set per deployment.
+            assert entry["api_base"] == Settings().llm_base_url
+            assert entry["api_key_env"] == "LLM_API_KEY"
+            assert entry["model_name"].startswith("openai/model-")
 
     def test_route_resolution_is_lazy_and_cached(self, loaded_routes) -> None:
         agent = RoutingAgent(llm=FakeLLMClient())

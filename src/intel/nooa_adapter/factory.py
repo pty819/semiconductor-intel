@@ -35,7 +35,7 @@ from intel.nooa_adapter.gateway import (
 from intel.nooa_adapter.middleware import LlmBudget, install_intel_middleware
 from intel.settings import Settings
 
-#: Shipped route registry (spec 14 §3.1 tiers → grok2api endpoint).
+#: Shipped route registry (spec 14 §3.1 tiers → the OpenAI-v1 endpoint).
 ROUTES_YAML = Path(__file__).parent / "registry" / "routes.yaml"
 
 
