@@ -11,6 +11,9 @@ dependencies = [
   "nooa",
 ]
 
+[project.scripts]
+intel = "intel.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
