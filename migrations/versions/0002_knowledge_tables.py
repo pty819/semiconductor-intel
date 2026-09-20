@@ -171,6 +171,7 @@ def upgrade() -> None:
     _create_coverage_tables()
     _create_publication_tables()
     _create_conversation_tables()
+    _create_output_generations()
     _create_governance_tables()
     _create_deferred_fks()
     _create_indexes()
@@ -1256,76 +1257,6 @@ def _create_generation_tables() -> None:
         [("generation_run_id", "generation_runs"), ("model_run_id", "model_runs")],
         extra_columns=[sa.Column("attempt", sa.Integer, nullable=False)],
     )
-    op.create_table(
-        "output_generations",
-        sa.Column("report_revision_id", _UUID, nullable=True),
-        sa.Column("evolution_revision_id", _UUID, nullable=True),
-        sa.Column("message_id", _UUID, nullable=True),
-        sa.Column("event_revision_id", _UUID, nullable=True),
-        sa.Column("event_topic_revision_id", _UUID, nullable=True),
-        sa.Column("generation_run_id", _UUID, nullable=False),
-        sa.Column("output_path", sa.Text, nullable=False),
-        sa.Column("role", sa.Text, nullable=False),
-        *_i_scope(),
-        *_common(),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_output_generations")),
-        sa.UniqueConstraint(
-            "owner_id", "industry_id", "id",
-            name=op.f("uq_output_generations_owner_id"),
-        ),
-        sa.CheckConstraint(
-            "role IN ('producer', 'verifier', 'upstream')",
-            name=op.f("ck_output_generations_role"),
-        ),
-        sa.CheckConstraint(
-            "num_nonnulls(report_revision_id, evolution_revision_id, message_id,"
-            " event_revision_id, event_topic_revision_id) = 1",
-            name=op.f("ck_output_generations_single_target"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["owner_id", "industry_id"],
-            ["industries.owner_id", "industries.id"],
-            name=op.f("fk_output_generations_owner_id_industries"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["owner_id", "industry_id", "report_revision_id"],
-            ["report_revisions.owner_id", "report_revisions.industry_id",
-             "report_revisions.id"],
-            name=op.f("fk_output_generations_owner_id_report_revisions"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["owner_id", "industry_id", "evolution_revision_id"],
-            ["evolution_revisions.owner_id", "evolution_revisions.industry_id",
-             "evolution_revisions.id"],
-            name=op.f("fk_output_generations_owner_id_evolution_revisions"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["owner_id", "industry_id", "message_id"],
-            ["messages.owner_id", "messages.industry_id", "messages.id"],
-            name=op.f("fk_output_generations_owner_id_messages"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["owner_id", "industry_id", "event_revision_id"],
-            ["event_revisions.owner_id", "event_revisions.industry_id",
-             "event_revisions.id"],
-            name=op.f("fk_output_generations_owner_id_event_revisions"),
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
-            ["owner_id", "industry_id", "event_topic_revision_id"],
-            ["event_topic_revisions.owner_id", "event_topic_revisions.industry_id",
-             "event_topic_revisions.id"],
-            name=op.f("fk_output_generations_owner_id_event_topic_revisions"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["owner_id", "industry_id", "generation_run_id"],
-            ["generation_runs.owner_id", "generation_runs.industry_id",
-             "generation_runs.id"],
-            name=op.f("fk_output_generations_owner_id_generation_runs"),
-        ),
-    )
-
-
 def _create_coverage_tables() -> None:
     op.create_table(
         "coverage_batches",
@@ -1790,6 +1721,81 @@ def _citation_table(
              "claim_revisions.id"],
             name=op.f(f"fk_{name}_owner_id_claim_revisions"),
             ondelete="RESTRICT",
+        ),
+    )
+
+
+def _create_output_generations() -> None:
+    """output_generations references report/evolution revisions and
+    messages, so it must be created AFTER the publication and
+    conversation tables (finding 1: inline FKs to later tables make the
+    online upgrade fail; the manifest test now gates statement order)."""
+    op.create_table(
+        "output_generations",
+        sa.Column("report_revision_id", _UUID, nullable=True),
+        sa.Column("evolution_revision_id", _UUID, nullable=True),
+        sa.Column("message_id", _UUID, nullable=True),
+        sa.Column("event_revision_id", _UUID, nullable=True),
+        sa.Column("event_topic_revision_id", _UUID, nullable=True),
+        sa.Column("generation_run_id", _UUID, nullable=False),
+        sa.Column("output_path", sa.Text, nullable=False),
+        sa.Column("role", sa.Text, nullable=False),
+        *_i_scope(),
+        *_common(),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_output_generations")),
+        sa.UniqueConstraint(
+            "owner_id", "industry_id", "id",
+            name=op.f("uq_output_generations_owner_id"),
+        ),
+        sa.CheckConstraint(
+            "role IN ('producer', 'verifier', 'upstream')",
+            name=op.f("ck_output_generations_role"),
+        ),
+        sa.CheckConstraint(
+            "num_nonnulls(report_revision_id, evolution_revision_id, message_id,"
+            " event_revision_id, event_topic_revision_id) = 1",
+            name=op.f("ck_output_generations_single_target"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["owner_id", "industry_id"],
+            ["industries.owner_id", "industries.id"],
+            name=op.f("fk_output_generations_owner_id_industries"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["owner_id", "industry_id", "report_revision_id"],
+            ["report_revisions.owner_id", "report_revisions.industry_id",
+             "report_revisions.id"],
+            name=op.f("fk_output_generations_owner_id_report_revisions"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["owner_id", "industry_id", "evolution_revision_id"],
+            ["evolution_revisions.owner_id", "evolution_revisions.industry_id",
+             "evolution_revisions.id"],
+            name=op.f("fk_output_generations_owner_id_evolution_revisions"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["owner_id", "industry_id", "message_id"],
+            ["messages.owner_id", "messages.industry_id", "messages.id"],
+            name=op.f("fk_output_generations_owner_id_messages"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["owner_id", "industry_id", "event_revision_id"],
+            ["event_revisions.owner_id", "event_revisions.industry_id",
+             "event_revisions.id"],
+            name=op.f("fk_output_generations_owner_id_event_revisions"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["owner_id", "industry_id", "event_topic_revision_id"],
+            ["event_topic_revisions.owner_id", "event_topic_revisions.industry_id",
+             "event_topic_revisions.id"],
+            name=op.f("fk_output_generations_owner_id_event_topic_revisions"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["owner_id", "industry_id", "generation_run_id"],
+            ["generation_runs.owner_id", "generation_runs.industry_id",
+             "generation_runs.id"],
+            name=op.f("fk_output_generations_owner_id_generation_runs"),
         ),
     )
 

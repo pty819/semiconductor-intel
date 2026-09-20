@@ -408,6 +408,31 @@ class TestMigrationMatchesOrm:
         }
         assert expected <= alters
 
+    def test_no_forward_references_in_statement_order(self) -> None:
+        """Online-upgrade ordering gate: Postgres rejects inline FKs whose
+        target relation does not exist yet, so in the offline-rendered SQL
+        every REFERENCES target (and every ALTER TABLE ... ADD CONSTRAINT
+        source) must already have been created earlier in statement order.
+        Self-referential FKs are fine — the CREATE TABLE header precedes its
+        own body in the text. This gate fails on any table emitted before
+        its FK targets (the output_generations bug class)."""
+        sql = _render_migration_sql()
+        created: set[str] = set()
+        problems: list[tuple[str, str]] = []
+        for m in re.finditer(
+            r"CREATE TABLE (\w+)|REFERENCES (\w+)"
+            r"|ALTER TABLE (\w+) ADD CONSTRAINT",
+            sql,
+        ):
+            if m.group(1):
+                created.add(m.group(1))
+            elif m.group(2):
+                if m.group(2) not in created:
+                    problems.append(("references-missing-table", m.group(2)))
+            elif m.group(3) is not None and m.group(3) not in created:
+                problems.append(("alter-on-missing-table", m.group(3)))
+        assert not problems, sorted(problems)
+
 
 class TestCommonColumnRules:
     """Spec 03 §1 公共字段 rules, checked structurally."""
