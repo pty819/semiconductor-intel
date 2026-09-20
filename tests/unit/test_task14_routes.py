@@ -270,12 +270,12 @@ class FakeJobsRepo:
             return None
         return job
 
-    async def request_cancel(self, job_id: UUID) -> bool:
+    async def request_cancel(self, job_id: UUID, *, at: datetime) -> int:
         job = await self.get_job(job_id)
         if job is None:
-            return False
-        job.cancel_requested_at = datetime.now(UTC)
-        return True
+            return 0
+        job.cancel_requested_at = at
+        return 1
 
 
 class FakeJobEventLog:
@@ -535,6 +535,30 @@ class TestReviewReportSearchJobs:
         assert record.kind == "apply_review"
         assert isinstance(record.payload["review_id"], str)
         assert isinstance(record.payload["decision_version"], str)
+
+    async def test_stale_review_expected_version_409(self, harness, client) -> None:
+        await add_user(harness, ALICE, "alice")
+        cookie, csrf = await login(client, "alice")
+        created = await create_industry(client, cookie, csrf)
+        industry_id = created.json()["id"]
+        review_id = uuid4()
+        harness["reviews"].items[review_id] = {
+            "id": review_id,
+            "row_version": 4,
+            "type": "event_merge",
+            "status": "pending",
+            "proposal": {},
+            "expected_versions": {},
+        }
+        resp = await client.post(
+            f"/api/v1/industries/{industry_id}/reviews/{review_id}/decisions",
+            json={"expected_version": 1, "action": "approve", "reason": "stale"},
+            cookies={"intel_session": cookie},
+            headers=auth_headers(csrf, "r-stale"),
+        )
+        assert resp.status_code == 409
+        assert error_code(resp) == "version_conflict"
+        assert resp.json()["error"]["details"]["current_version"] == 4
 
     async def test_report_create_enqueues_report_build(self, harness, client) -> None:
         await add_user(harness, ALICE, "alice")

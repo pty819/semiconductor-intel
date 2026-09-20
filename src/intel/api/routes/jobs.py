@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -21,7 +22,7 @@ from intel.api.pagination import Page, PageParams, paginate
 from intel.api.sse import EventCursorExpired, sse_stream
 from intel.contracts import JobAccepted, JobCommand, JobView
 from intel.repositories.base import IndustryScope
-from intel.repositories.jobs import JobRecord
+from intel.repositories.jobs import CANCELLABLE_STATES, JobRecord
 from intel.services.errors import (
     EventCursorExpiredError,
     InvalidStateTransition,
@@ -34,6 +35,19 @@ Repo = Annotated[object, Depends(get_jobs_repo)]
 Log = Annotated[object, Depends(get_job_event_log)]
 Guard = Annotated[IdempotencyGuard, Depends(idempotency)]
 _RETRYABLE = frozenset({"failed", "cancelled", "partial"})
+
+
+async def request_job_cancel(
+    repo, job: JobRecord, *, now: datetime | None = None
+) -> None:
+    """Cancel through the real JobsStore signature: ``request_cancel(*, at=)``."""
+    if job.state not in CANCELLABLE_STATES:
+        raise InvalidStateTransition(
+            "job cannot be cancelled from its current state",
+            action="cancel",
+            current=job.state,
+        )
+    await repo.request_cancel(job.id, at=now or datetime.now(UTC))
 
 
 def _view(job: JobRecord) -> JobView:
@@ -104,7 +118,7 @@ async def cancel_job(
     job = await repo.get_job(job_id)
     if job is None:
         raise NotFound("job not found")
-    await repo.request_cancel(job_id)
+    await request_job_cancel(repo, job)
     accepted = JobAccepted(
         job_id=job.id,
         state=job.state,

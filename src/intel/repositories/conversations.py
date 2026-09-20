@@ -9,11 +9,66 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from intel.contracts import ConversationView, MessageView
+from intel.contracts import AnswerBlock, Citation, ConversationView, MessageView
 from intel.db.models.conversation import Conversation, Message
 from intel.db.rls import require_owner_guc, set_scope
 from intel.repositories.base import IndustryScope, ScopedRepository
 from intel.services.research import ParentMismatch
+
+
+def _block_kind(raw: object, *, role: str) -> str:
+    if raw in ("fact", "inference", "unknown"):
+        return str(raw)
+    return "unknown" if role == "user" else "fact"
+
+
+def _citations_from_manifest(manifest: dict) -> list[Citation]:
+    citations: list[Citation] = []
+    for item in manifest.get("citations") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            citations.append(Citation.model_validate(item))
+        except (TypeError, ValueError):
+            continue
+    return citations
+
+
+def message_to_view(row) -> MessageView:
+    """Map a messages row (content + citation_manifest) onto MessageView."""
+    manifest = dict(getattr(row, "citation_manifest", None) or {})
+    raw_blocks = manifest.get("blocks")
+    blocks: list[AnswerBlock] = []
+    if isinstance(raw_blocks, list):
+        for item in raw_blocks:
+            if not isinstance(item, dict):
+                continue
+            citations = item.get("citation_ids") or item.get("citations") or []
+            blocks.append(
+                AnswerBlock(
+                    text=str(item.get("text") or ""),
+                    kind=_block_kind(item.get("kind"), role=str(row.role)),  # type: ignore[arg-type]
+                    citation_ids=[str(cid) for cid in citations],
+                )
+            )
+    if not blocks and getattr(row, "content", None):
+        blocks = [
+            AnswerBlock(
+                text=str(row.content),
+                kind=_block_kind(None, role=str(row.role)),  # type: ignore[arg-type]
+            )
+        ]
+    return MessageView(
+        id=row.id,
+        parent_message_id=row.parent_message_id,
+        turn_index=row.turn_index,
+        role=row.role,  # type: ignore[arg-type]
+        status=row.status,  # type: ignore[arg-type]
+        blocks=blocks,
+        citations=_citations_from_manifest(manifest),
+        as_of=row.as_of,
+        job_id=row.job_id,
+    )
 
 
 class ConversationRepository:
@@ -180,14 +235,4 @@ class SqlAlchemyConversationRepository(ScopedRepository, ConversationRepository)
         )
 
     def _message_view(self, row: Message) -> MessageView:
-        return MessageView(
-            id=row.id,
-            parent_message_id=row.parent_message_id,
-            turn_index=row.turn_index,
-            role=row.role,  # type: ignore[arg-type]
-            status=row.status,  # type: ignore[arg-type]
-            blocks=[],
-            citations=[],
-            as_of=row.as_of,
-            job_id=row.job_id,
-        )
+        return message_to_view(row)

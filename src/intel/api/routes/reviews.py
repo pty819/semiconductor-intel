@@ -19,7 +19,7 @@ from intel.api.deps import (
 from intel.api.idempotency import IdempotencyGuard, idempotency
 from intel.api.pagination import Page, PageParams, paginate
 from intel.contracts import ReviewDecision, ReviewView
-from intel.services.errors import NotFound
+from intel.services.errors import NotFound, VersionConflict
 
 router = APIRouter(prefix="/industries/{industry_id}/reviews", tags=["reviews"])
 
@@ -80,6 +80,9 @@ async def decide_review(
     row = await repo.get_review(review_id)
     if row is None:
         raise NotFound("review not found")
+    current = int(row.get("row_version") or 1)
+    if body.expected_version != current:
+        raise VersionConflict(current)
     payload = {
         "industry": str(industry_id),
         "review_id": str(review_id),

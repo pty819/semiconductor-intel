@@ -10,10 +10,106 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from intel.contracts import AnswerBlock, Citation
 from intel.db.models.conversation import Report, ReportRevision
 from intel.db.rls import require_owner_guc, set_scope
 from intel.repositories.base import IndustryScope, ScopedRepository
 from intel.services.reports import ReportComposition
+
+
+def _citations_from_json(raw: object) -> list[dict]:
+    citations: list[dict] = []
+    if not isinstance(raw, list):
+        return citations
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            citations.append(Citation.model_validate(item).model_dump(mode="json"))
+        except (TypeError, ValueError):
+            continue
+    return citations
+
+
+def _blocks_from_content(content: object) -> list[dict]:
+    blocks: list[dict] = []
+    if not isinstance(content, list):
+        return blocks
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        statements = item.get("statements")
+        if isinstance(statements, list):
+            for statement in statements:
+                if isinstance(statement, dict):
+                    blocks.append(
+                        AnswerBlock(
+                            text=str(statement.get("text") or ""),
+                            kind="fact",
+                            citation_ids=[
+                                str(cid)
+                                for cid in (
+                                    statement.get("citations")
+                                    or statement.get("citation_ids")
+                                    or []
+                                )
+                            ],
+                        ).model_dump(mode="json")
+                    )
+                elif isinstance(statement, str) and statement:
+                    blocks.append(
+                        AnswerBlock(text=statement, kind="fact").model_dump(mode="json")
+                    )
+            continue
+        if item.get("text"):
+            kind = item.get("kind")
+            if kind not in ("fact", "inference", "unknown"):
+                kind = "fact"
+            blocks.append(
+                AnswerBlock(
+                    text=str(item.get("text") or ""),
+                    kind=kind,  # type: ignore[arg-type]
+                    citation_ids=[
+                        str(cid)
+                        for cid in (
+                            item.get("citation_ids") or item.get("citations") or []
+                        )
+                    ],
+                ).model_dump(mode="json")
+            )
+    return blocks
+
+
+def report_revision_to_view(
+    report: Report | object, revision: ReportRevision | object | None
+) -> dict[str, Any]:
+    """Map report + revision content onto the ReportView projection."""
+    coverage = (
+        getattr(revision, "coverage", None) if revision is not None else None
+    ) or {
+        "status": "pending",
+        "processed": 0,
+        "failed": 0,
+        "gaps": [],
+    }
+    manifest = (
+        getattr(revision, "input_manifest", None) if revision is not None else None
+    ) or {}
+    content = getattr(revision, "content", None) if revision is not None else None
+    citations = getattr(revision, "citations", None) if revision is not None else None
+    return {
+        "id": report.id,
+        "revision_id": revision.id if revision is not None else report.id,
+        "title": report.title,
+        "as_of": getattr(revision, "as_of", None)
+        if revision is not None
+        else datetime.now(UTC),
+        "blocks": _blocks_from_content(content),
+        "citations": _citations_from_json(citations),
+        "coverage": coverage,
+        "stale": bool(manifest.get("stale", False)),
+        "type": report.type,
+    }
 
 
 class ReportRepository:
@@ -143,21 +239,4 @@ class SqlAlchemyReportRepository(ScopedRepository, ReportRepository):
         return report_id
 
     def _view(self, report: Report, revision: ReportRevision | None) -> dict[str, Any]:
-        coverage = (revision.coverage if revision is not None else None) or {
-            "status": "pending",
-            "processed": 0,
-            "failed": 0,
-            "gaps": [],
-        }
-        manifest = (revision.input_manifest if revision is not None else None) or {}
-        return {
-            "id": report.id,
-            "revision_id": revision.id if revision is not None else report.id,
-            "title": report.title,
-            "as_of": revision.as_of if revision is not None else datetime.now(UTC),
-            "blocks": [],
-            "citations": [],
-            "coverage": coverage,
-            "stale": bool(manifest.get("stale", False)),
-            "type": report.type,
-        }
+        return report_revision_to_view(report, revision)
