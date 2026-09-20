@@ -30,3 +30,9 @@ nooa = { path = "/Users/liyifan/Documents/labs-OO-Agents", editable = true }
 [tool.pytest.ini_options]
 markers = ["integration: needs real Postgres", "live: needs network/provider"]
 addopts = "-m 'not integration and not live'"
+
+[tool.ruff.lint.per-file-ignores]
+# models.py is a byte-for-byte copy of the design pack (single source of
+# truth for DTOs). Its unused `datetime` import exists upstream; editing it
+# here would break verbatim tracking. Do not "fix" this file.
+"src/intel/contracts/models.py" = ["F401"]
