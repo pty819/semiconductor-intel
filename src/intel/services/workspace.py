@@ -3,8 +3,9 @@
 Semantics enforced here, above any storage:
 
 - Industry 状态机 draft/active/paused/archived with an explicit allowed-map
-  (activate←draft, pause←active, archive←active|paused, restore←archived→
-  paused); illegal transitions raise ``InvalidStateTransition``.
+  (activate←draft|paused, pause←active, archive←active|paused,
+  restore←archived→paused); illegal transitions raise
+  ``InvalidStateTransition``.
 - Topic 状态机 active/paused/archived; archived is terminal (no topic
   restore in v1).
 - PATCH merges revision-bearing fields and appends a new immutable revision
@@ -57,9 +58,10 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-#: action -> (statuses it may start from, status it lands in) (01 §5).
+#: action -> (statuses it may start from, status it lands in) (01 §5,
+#: 07 §5: 恢复先改 paused，再选择 active — so activate is legal from paused).
 INDUSTRY_TRANSITIONS: dict[str, tuple[frozenset[str], str]] = {
-    "activate": (frozenset({"draft"}), "active"),
+    "activate": (frozenset({"draft", "paused"}), "active"),
     "pause": (frozenset({"active"}), "paused"),
     "archive": (frozenset({"active", "paused"}), "archived"),
     "restore": (frozenset({"archived"}), "paused"),

@@ -478,6 +478,52 @@ class TestIndustryLifecycle:
                 ),
             )
 
+    async def test_activate_from_paused(
+        self, service: WorkspaceService
+    ) -> None:
+        # 07 §5: 恢复先改 paused，再选择 active — activate must be legal
+        # from paused, otherwise paused is a dead end.
+        view = await activated(service)
+        paused = await service.lifecycle(
+            view.id,
+            LifecycleCommand(action="pause", expected_version=view.row_version),
+        )
+        reactivated = await service.lifecycle(
+            view.id,
+            LifecycleCommand(
+                action="activate", expected_version=paused.row_version
+            ),
+        )
+        assert reactivated.status == "active"
+
+    async def test_full_lifecycle_path_round_trip(
+        self, service: WorkspaceService
+    ) -> None:
+        # draft→active→paused→active→archived→restore(paused)→active.
+        view = await service.create_industry(CREATE)
+
+        async def step(current, action):
+            return await service.lifecycle(
+                view.id,
+                LifecycleCommand(
+                    action=action, expected_version=current.row_version
+                ),
+            )
+
+        view = await step(view, "activate")
+        assert view.status == "active"
+        view = await step(view, "pause")
+        assert view.status == "paused"
+        view = await step(view, "activate")
+        assert view.status == "active"
+        view = await step(view, "archive")
+        assert view.status == "archived"
+        view = await step(view, "restore")
+        assert view.status == "paused"
+        view = await step(view, "activate")
+        assert view.status == "active"
+        assert view.row_version == 7  # one bump per transition
+
     @pytest.mark.parametrize("via_pause", [True, False])
     async def test_archive_from_active_or_paused(
         self, service: WorkspaceService, via_pause: bool
