@@ -277,3 +277,71 @@ async def test_plain_html_never_triggers_browser() -> None:
     result = await fetcher.fetch(request())
     assert result.outcome == "captured"
     assert browser.calls == []
+
+
+# -- HttpPageClient: untrusted-page caps and hop re-validation (fix round 1) -------
+
+
+def make_page_client(handler, *, max_bytes: int = 10_000_000):
+    from intel.sources.pageclient import HttpPageClient
+
+    return HttpPageClient(
+        guard=UrlGuard(resolver=StaticResolver()),
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), follow_redirects=False
+        ),
+        max_bytes=max_bytes,
+    )
+
+
+async def test_page_client_returns_page_within_cap() -> None:
+    from intel.sources.pageclient import HttpPageClient  # noqa: F401
+
+    client = make_page_client(
+        lambda req: httpx.Response(
+            200, headers={"content-type": "text/html"}, content=b"<html>x</html>"
+        )
+    )
+    response = await client.get(GOOD)
+    assert response.status == 200
+    assert response.body == b"<html>x</html>"
+
+
+async def test_page_client_rejects_oversized_body_upfront() -> None:
+    from intel.sources.pageclient import PageBodyTooLarge
+
+    client = make_page_client(
+        lambda req: httpx.Response(
+            200,
+            headers={"content-type": "text/xml", "content-length": "999999"},
+            content=b"<x/>",
+        ),
+        max_bytes=100,
+    )
+    with pytest.raises(PageBodyTooLarge):
+        await client.get(GOOD)
+
+
+async def test_page_client_rejects_oversized_body_after_read() -> None:
+    from intel.sources.pageclient import PageBodyTooLarge
+
+    client = make_page_client(
+        lambda req: httpx.Response(  # lying/absent Content-Length
+            200, headers={"content-type": "text/xml"}, content=b"x" * 500
+        ),
+        max_bytes=100,
+    )
+    with pytest.raises(PageBodyTooLarge):
+        await client.get(GOOD)
+
+
+async def test_page_client_revalidates_each_redirect_hop() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            302, headers={"location": "http://169.254.169.254/latest/"}
+        )
+
+    client = make_page_client(handler)
+    with pytest.raises(UrlBlockedError) as excinfo:
+        await client.get(GOOD)
+    assert excinfo.value.reason == "link_local"

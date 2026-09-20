@@ -719,3 +719,20 @@ async def test_page_monitor_refetches_each_poll_with_fresh_epoch() -> None:
     assert len(harness.pool_db.captures) == 2
     observations = list(harness.pool_db.observations.values())
     assert [o["outcome"] for o in observations] == ["captured", "captured"]
+
+
+# -- oversized discovery page fails closed (fix round 1) -----------------------------
+
+
+async def test_discover_oversized_page_fails_without_retry() -> None:
+    from intel.sources.pageclient import PageBodyTooLarge
+
+    harness = Harness({SEED: PageBodyTooLarge(SEED, 100)})
+    feed_id = seed_feed(harness.pool_db, owner_id=OWNER, seed_url=SEED)
+    await harness.enqueue("discover", {"feed_id": str(feed_id)})
+    await harness.drain()
+
+    job = harness.jobs_of_kind("discover")[0]
+    assert job["state"] == "failed"  # non-retryable, not retry_wait
+    assert job["error"]["code"] == "page_body_too_large"
+    assert harness.pool_db.items == {}  # nothing persisted

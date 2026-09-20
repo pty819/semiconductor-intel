@@ -226,3 +226,56 @@ async def test_backend_rejects_unexpected_port() -> None:
         await backend.connect_tcp("good.example.com", 8080)
     assert excinfo.value.reason == "port"
     assert delegate.calls == []
+
+
+# -- guarded client construction (Finding 2: no silent degradation) ----------------
+
+
+async def test_guarded_async_client_pins_the_pool_backend() -> None:
+
+    from intel.sources.ssrf import (
+        GuardedNetworkBackend,
+        assert_guarded_client,
+        guarded_async_client,
+    )
+
+    g = guard()
+    client = guarded_async_client(g)
+    try:
+        backend = assert_guarded_client(client)  # raises if not pinned
+        assert isinstance(backend, GuardedNetworkBackend)
+        assert backend._guard is g  # the pin uses OUR guard
+    finally:
+        await client.aclose()
+    # The factory's redirect posture: hops are re-validated manually.
+    assert client.follow_redirects is False
+
+
+def test_assert_guarded_client_fails_loudly_on_unguarded_clients() -> None:
+    import httpx
+    import pytest as _pytest
+
+    from intel.sources.ssrf import GuardNotInstalled, assert_guarded_client
+
+    with _pytest.raises(GuardNotInstalled):
+        assert_guarded_client(httpx.AsyncClient())
+    mocked = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200))
+    )
+    with _pytest.raises(GuardNotInstalled):
+        assert_guarded_client(mocked)  # MockTransport has no pool to pin
+
+
+async def test_http_fetcher_builds_a_guarded_client_offline() -> None:
+    import httpx
+
+    from intel.sources.fetcher import HttpFetcher
+    from intel.sources.ssrf import assert_guarded_client
+
+    fetcher = HttpFetcher(guard=guard())
+    client = fetcher._ensure_client()
+    try:
+        assert isinstance(assert_guarded_client(client), object)
+    finally:
+        await fetcher.aclose()
+    _ = httpx  # silence import grouping

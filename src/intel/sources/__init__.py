@@ -21,7 +21,12 @@ from intel.sources.blobstore import (
     MemoryObjectStore,
     ObjectStore,
 )
-from intel.sources.browser import BrowserRenderer, deterministic_navigation
+from intel.sources.browser import (
+    BrowserRenderer,
+    InterceptionLog,
+    deterministic_navigation,
+    install_guard_interception,
+)
 from intel.sources.dto import (
     ADAPTER_KINDS,
     CaptureResult,
@@ -34,6 +39,7 @@ from intel.sources.dto import (
 from intel.sources.fetcher import BrowserUnavailable, HttpFetcher
 from intel.sources.pageclient import (
     HttpPageClient,
+    PageBodyTooLarge,
     PageClient,
     PageFetchError,
     PageResponse,
@@ -42,10 +48,13 @@ from intel.sources.politeness import PolitenessGate
 from intel.sources.ssrf import (
     AsyncioResolver,
     GuardedNetworkBackend,
+    GuardNotInstalled,
     Resolver,
     UrlBlockedError,
     UrlGuard,
     ValidatedTarget,
+    assert_guarded_client,
+    guarded_async_client,
 )
 
 __all__ = [
@@ -61,11 +70,14 @@ __all__ = [
     "FeedPlan",
     "FetchRequest",
     "FileObjectStore",
+    "GuardNotInstalled",
     "GuardedNetworkBackend",
     "HttpFetcher",
     "HttpPageClient",
+    "InterceptionLog",
     "MemoryObjectStore",
     "ObjectStore",
+    "PageBodyTooLarge",
     "PageClient",
     "PageFetchError",
     "PageResponse",
@@ -74,7 +86,10 @@ __all__ = [
     "UrlBlockedError",
     "UrlGuard",
     "ValidatedTarget",
+    "assert_guarded_client",
     "deterministic_navigation",
+    "guarded_async_client",
+    "install_guard_interception",
     "make_adapter",
     "validate_adapter_config",
 ]

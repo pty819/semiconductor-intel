@@ -21,6 +21,21 @@ from intel.sources.pageclient import PageClient
 _NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 
 
+def _hardened_parser() -> etree.XMLParser:
+    """Parser settings for UNTRUSTED XML (billion-laughs defense): no
+    entity resolution (a DTD full of nested entities yields unexpanded
+    reference nodes instead of a memory bomb), no network DTD fetch, no
+    huge-tree relaxation. A fresh instance per parse — lxml parsers are
+    not thread-safe to share."""
+    return etree.XMLParser(
+        resolve_entities=False,
+        no_network=True,
+        huge_tree=False,
+        load_dtd=False,
+        dtd_validation=False,
+    )
+
+
 def _path_matches(loc: str, prefixes: list[str]) -> bool:
     """Allowed paths are absolute path prefixes (``/etch/``); they match
     a ``<loc>`` by its URL path (an absolute-URL prefix also matches)."""
@@ -46,7 +61,7 @@ class SitemapAdapter:
         response = await self._client.get(plan.seed)
         warnings: list[str] = []
         try:
-            root = etree.fromstring(response.body)
+            root = etree.fromstring(response.body, parser=_hardened_parser())
         except etree.XMLSyntaxError as exc:
             raise ValueError(f"sitemap is not well-formed XML: {plan.seed}") from exc
 

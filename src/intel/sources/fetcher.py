@@ -44,7 +44,7 @@ from intel.sources.dto import (
     CaptureResult,
     FetchRequest,
 )
-from intel.sources.ssrf import GuardedNetworkBackend, UrlGuard
+from intel.sources.ssrf import UrlGuard, guarded_async_client
 
 _USER_AGENT = "semiconductor-intel/0.1 (+polite polling)"
 #: Empty-body HTML below this much visible text is a JS shell.
@@ -324,15 +324,7 @@ class HttpFetcher:
     def _ensure_client(self) -> httpx.AsyncClient:
         if self._client is not None:
             return self._client
-        import httpcore
-
-        transport = httpx.AsyncHTTPTransport()
-        pool = getattr(transport, "_pool", None)
-        if isinstance(pool, httpcore.AsyncConnectionPool):
-            pool._network_backend = GuardedNetworkBackend(
-                self._guard, delegate=pool._network_backend
-            )
-        self._client = httpx.AsyncClient(
-            transport=transport, follow_redirects=False, timeout=60.0
-        )
+        # Construction fails loudly when the pin cannot be installed —
+        # never a silently unguarded pool (Finding 2).
+        self._client = guarded_async_client(self._guard, timeout=60.0)
         return self._client

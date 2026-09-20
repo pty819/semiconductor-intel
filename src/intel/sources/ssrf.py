@@ -36,6 +36,7 @@ from typing import Protocol
 from urllib.parse import urlsplit
 
 import httpcore
+import httpx
 
 #: Only http/https leave the process.
 ALLOWED_SCHEMES: frozenset[str] = frozenset({"http", "https"})
@@ -298,3 +299,59 @@ class GuardedNetworkBackend(httpcore.AsyncNetworkBackend):
 
     async def sleep(self, seconds: float) -> None:
         await self._delegate.sleep(seconds)
+
+
+class GuardNotInstalled(RuntimeError):
+    """A client that should be SSRF-guarded is not (SEC-02).
+
+    Raised at construction/startup when an httpx/httpcore upgrade
+    defeats the connection-pool patch — pinning must fail loudly, never
+    silently degrade to an unguarded pool.
+    """
+
+
+def guarded_async_client(
+    guard: UrlGuard, *, timeout: float = 60.0
+) -> httpx.AsyncClient:
+    """Build an httpx client whose every TCP connect is guard-pinned.
+
+    The returned client follows no redirects automatically (callers
+    re-validate each hop manually); ``assert_guarded_client`` is invoked
+    before returning so the pin is proven, not assumed.
+    """
+    transport = httpx.AsyncHTTPTransport()
+    pool = getattr(transport, "_pool", None)
+    if not isinstance(pool, httpcore.AsyncConnectionPool):
+        raise GuardNotInstalled(
+            "httpx transport no longer exposes an httpcore"
+            " AsyncConnectionPool; the guarded client cannot be built"
+            " (SEC-02) — pin the httpx/httpcore versions or port the"
+            " patch to the new layout"
+        )
+    pool._network_backend = GuardedNetworkBackend(
+        guard, delegate=pool._network_backend
+    )
+    client = httpx.AsyncClient(
+        transport=transport, follow_redirects=False, timeout=timeout
+    )
+    assert_guarded_client(client)
+    return client
+
+
+def assert_guarded_client(
+    client: httpx.Client | httpx.AsyncClient,
+) -> GuardedNetworkBackend:
+    """Startup assertion (Finding 2): the client's pool backend must be a
+    :class:`GuardedNetworkBackend`. Call wherever a production client is
+    built or injected so a dependency upgrade fails at boot, not in the
+    field."""
+    transport = getattr(client, "_transport", None)
+    pool = getattr(transport, "_pool", None)
+    backend = getattr(pool, "_network_backend", None)
+    if not isinstance(backend, GuardedNetworkBackend):
+        raise GuardNotInstalled(
+            f"client {type(client).__name__} has no GuardedNetworkBackend"
+            " on its connection pool — outbound fetches would dial"
+            " unvalidated addresses (SEC-02)"
+        )
+    return backend

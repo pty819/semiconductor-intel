@@ -3,6 +3,12 @@
 The adapter-facing seam: a tiny async ``get(url)`` protocol so adapters
 stay pure (fixtures drive unit tests) while production wraps an httpx
 client behind the SSRF guard with manual redirect re-validation.
+
+Untrusted-content limits (Task 7 fix round 1): bodies are capped at
+``max_bytes`` (Content-Length pre-check + post-read length check, the
+same documented post-read semantics as the fetcher) so a hostile feed
+or sitemap cannot balloon memory during discovery, and XML consumers
+parse with hardened parser settings (see adapters/sitemap.py).
 """
 
 from __future__ import annotations
@@ -12,10 +18,12 @@ from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urljoin
 
-import httpcore
 import httpx
 
-from intel.sources.ssrf import GuardedNetworkBackend, UrlGuard
+from intel.sources.ssrf import UrlGuard, guarded_async_client
+
+#: Discovery pages cap at the same default budget as fetch bodies.
+DEFAULT_PAGE_MAX_BYTES = 10_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +57,15 @@ class PageFetchError(Exception):
         self.retry_after = retry_after
 
 
+class PageBodyTooLarge(PageFetchError):
+    """The page body exceeded ``max_bytes`` (non-retryable: the same page
+    will still be too large next attempt)."""
+
+    def __init__(self, url: str, max_bytes: int) -> None:
+        super().__init__(-1, url=url)
+        self.max_bytes = max_bytes
+
+
 class PageClient(Protocol):
     async def get(
         self, url: str, *, headers: Mapping[str, str] | None = None
@@ -71,10 +88,11 @@ def _parse_retry_after(value: str | None) -> float | None:
 class HttpPageClient:
     """Production :class:`PageClient` behind the :class:`UrlGuard`.
 
-    When ``client`` is omitted, a guarded client is built once: its
-    httpcore connection pool dials only guard-validated addresses
-    (:class:`GuardedNetworkBackend`), and every redirect hop is resolved
-    manually through ``guard.validate`` again (SEC-02 每次重定向重校验).
+    When ``client`` is omitted, a guarded client is built once via
+    :func:`~intel.sources.ssrf.guarded_async_client` (construction fails
+    loudly when the pin cannot be installed); every redirect hop is
+    resolved manually through ``guard.validate`` again (SEC-02 每次重定向
+    重校验), and bodies are size-capped like fetch bodies.
     """
 
     def __init__(
@@ -82,10 +100,12 @@ class HttpPageClient:
         *,
         guard: UrlGuard,
         client: httpx.AsyncClient | None = None,
+        max_bytes: int = DEFAULT_PAGE_MAX_BYTES,
     ) -> None:
         self._guard = guard
         self._client = client
         self._owns_client = client is None
+        self._max_bytes = max_bytes
 
     async def get(
         self, url: str, *, headers: Mapping[str, str] | None = None
@@ -111,6 +131,7 @@ class HttpPageClient:
                         response.headers.get("retry-after")
                     ),
                 )
+            self._check_size(response)
             return PageResponse(
                 status=response.status_code,
                 url=str(response.url),
@@ -120,6 +141,19 @@ class HttpPageClient:
             )
         raise PageFetchError(-1, url=current)
 
+    def _check_size(self, response: httpx.Response) -> None:
+        """Same documented post-read semantics as the fetcher: trust an
+        honest Content-Length up front, always verify the read body."""
+        content_length = response.headers.get("content-length")
+        if (
+            content_length
+            and content_length.isdigit()
+            and int(content_length) > self._max_bytes
+        ):
+            raise PageBodyTooLarge(str(response.url), self._max_bytes)
+        if len(response.content) > self._max_bytes:
+            raise PageBodyTooLarge(str(response.url), self._max_bytes)
+
     async def aclose(self) -> None:
         if self._owns_client and self._client is not None:
             await self._client.aclose()
@@ -128,13 +162,5 @@ class HttpPageClient:
     def _ensure_client(self) -> httpx.AsyncClient:
         if self._client is not None:
             return self._client
-        transport = httpx.AsyncHTTPTransport()
-        pool = getattr(transport, "_pool", None)
-        if isinstance(pool, httpcore.AsyncConnectionPool):
-            pool._network_backend = GuardedNetworkBackend(
-                self._guard, delegate=pool._network_backend
-            )
-        self._client = httpx.AsyncClient(
-            transport=transport, follow_redirects=False, timeout=30.0
-        )
+        self._client = guarded_async_client(self._guard, timeout=30.0)
         return self._client

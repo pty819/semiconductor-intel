@@ -443,3 +443,42 @@ def test_cursor_codec_is_opaque_and_tolerant() -> None:
     assert decode_cursor(cursor) == {"page": 3}
     assert decode_cursor("!!!not-base64!!!") == {}
     assert decode_cursor(None) == {}
+
+
+# -- untrusted-XML hardening (fix round 1: billion-laughs defense) ------------------
+
+
+async def test_sitemap_entity_expansion_is_neutralized() -> None:
+    """A DTD full of nested entities must not expand: with
+    resolve_entities=False the <loc> text stays unexpanded (None) and the
+    entry is dropped instead of ballooning memory."""
+    laughing = (
+        b"<?xml version='1.0'?>\n"
+        b"<!DOCTYPE urlset [\n"
+        b'  <!ENTITY a "0123456789abcdefghijklmnopqrstuvwxyz0123456789">\n'
+        b'  <!ENTITY a1 "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">\n'
+        b'  <!ENTITY a2 "&a1;&a1;&a1;&a1;&a1;&a1;&a1;&a1;&a1;&a1;">\n'
+        b'  <!ENTITY a3 "&a2;&a2;&a2;&a2;&a2;&a2;&a2;&a2;&a2;&a2;">\n'
+        b"]>\n"
+        b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        b"<url><loc>https://docs.example.com/etch/&a3;</loc></url>"
+        b"</urlset>"
+    )
+    seed_url = "https://docs.example.com/sitemap.xml"
+    client = FakePageClient(
+        {seed_url: PageResponse(200, seed_url, {}, laughing, "text/xml")}
+    )
+    adapter = make_adapter("sitemap", client)
+    sitemap_plan = plan(
+        adapter="sitemap",
+        seed=seed_url,
+        config={"allowed_paths": ["/etch"]},
+    )
+    page = await adapter.discover(sitemap_plan, None)
+    # No expansion: the entity stays an unresolved reference node, so
+    # <loc> text is only the segment before it -- nothing anywhere in
+    # the result carries the expanded payload, and memory stayed flat.
+    assert [i.url for i in page.items] == ["https://docs.example.com/etch/"]
+    expanded = b"0123456789abcdefghijklmnopqrstuvwxyz" * 10
+    assert expanded not in str(page).encode()
+    assert all(expanded not in i.url.encode() for i in page.items)

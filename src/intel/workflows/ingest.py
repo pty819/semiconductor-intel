@@ -51,7 +51,7 @@ from intel.sources.adapters import make_adapter, validate_adapter_config
 from intel.sources.blobstore import ObjectStore
 from intel.sources.dto import CaptureResult, FeedPlan, FetchRequest
 from intel.sources.fetcher import format_http_date
-from intel.sources.pageclient import PageClient, PageFetchError
+from intel.sources.pageclient import PageBodyTooLarge, PageClient, PageFetchError
 from intel.sources.politeness import PolitenessGate
 from intel.sources.ssrf import UrlBlockedError
 from intel.workers.runner import JobFailure, JobHandler, RunContext
@@ -161,6 +161,9 @@ async def _audit(
 
 
 def _page_failure(exc: PageFetchError) -> JobFailure:
+    if isinstance(exc, PageBodyTooLarge):
+        # Non-retryable: the same page will still exceed max_bytes.
+        return JobFailure("page_body_too_large", str(exc))
     if exc.status == 429:
         return JobFailure(
             "transient", "feed page rate limited", retry_after=exc.retry_after
