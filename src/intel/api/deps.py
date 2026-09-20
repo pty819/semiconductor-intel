@@ -30,14 +30,21 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from intel.repositories.base import IndustryScope
+from intel.repositories.conversations import SqlAlchemyConversationRepository
+from intel.repositories.documents import SqlAlchemyDocumentRepository
+from intel.repositories.generation import SqlAlchemyGenerationRepository
 from intel.repositories.idempotency import (
     IdempotencyRepository,
     SqlAlchemyIdempotencyRepository,
 )
+from intel.repositories.jobs import SqlAlchemyJobEventLog, SqlAlchemyJobsStore
 from intel.repositories.knowledge import (
     KnowledgeReadRepository,
     SqlAlchemyKnowledgeRepository,
 )
+from intel.repositories.reports import SqlAlchemyReportRepository
+from intel.repositories.reviews import SqlAlchemyReviewRepository
+from intel.repositories.search import SqlAlchemySearchRepository
 from intel.repositories.sources import (
     SourcesRepository,
     SqlAlchemySourcesRepository,
@@ -214,6 +221,43 @@ def get_knowledge_repo(
     return SqlAlchemyKnowledgeRepository(conn, scope)
 
 
+def get_conversation_repo(scope: IndustryScopeDep, conn: ConnDep):
+    return SqlAlchemyConversationRepository(conn, scope)
+
+
+def get_review_repo(scope: IndustryScopeDep, conn: ConnDep):
+    return SqlAlchemyReviewRepository(conn, scope)
+
+
+def get_report_repo(scope: IndustryScopeDep, conn: ConnDep):
+    return SqlAlchemyReportRepository(conn, scope)
+
+
+def get_search_repo(scope: IndustryScopeDep, conn: ConnDep):
+    return SqlAlchemySearchRepository(conn, scope)
+
+
+def get_coverage_repo(scope: IndustryScopeDep, conn: ConnDep):
+    return SqlAlchemySearchRepository(conn, scope)
+
+
+def get_document_repo(scope: IndustryScopeDep, conn: ConnDep):
+    return SqlAlchemyDocumentRepository(conn, scope)
+
+
+def get_generation_repo(scope: IndustryScopeDep, conn: ConnDep):
+    return SqlAlchemyGenerationRepository(conn, scope)
+
+
+def get_jobs_repo(principal: CurrentPrincipal, conn: ConnDep):
+    return SqlAlchemyJobsStore(conn, IndustryScope(owner_id=principal.user_id))
+
+
+def get_job_event_log(principal: CurrentPrincipal, conn: ConnDep):
+    store = SqlAlchemyJobsStore(conn, IndustryScope(owner_id=principal.user_id))
+    return SqlAlchemyJobEventLog(store)
+
+
 def get_idempotency_repo(
     principal: CurrentPrincipal, conn: ConnDep
 ) -> IdempotencyRepository:
@@ -270,7 +314,11 @@ __all__ = [
     "IdentityServiceDep",
     "IndustryScopeDep",
     "get_conn",
+    "get_conversation_repo",
+    "get_coverage_repo",
+    "get_document_repo",
     "get_enqueuer",
+    "get_generation_repo",
     "get_idempotency_repo",
     "get_identity_repo",
     "get_identity_service",
@@ -278,8 +326,13 @@ __all__ = [
     "get_industry_sources_service",
     "get_industry_workspace_repo",
     "get_industry_workspace_service",
+    "get_job_event_log",
+    "get_jobs_repo",
     "get_principal",
+    "get_report_repo",
+    "get_review_repo",
     "get_scope",
+    "get_search_repo",
     "get_settings",
     "get_sources_repo",
     "get_sources_service",

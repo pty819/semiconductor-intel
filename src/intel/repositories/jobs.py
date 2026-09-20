@@ -610,6 +610,79 @@ class SqlAlchemyJobsStore:
         )
         return result.rowcount
 
+    async def list_jobs(
+        self,
+        *,
+        industry_id: UUID | None = None,
+        kind: str | None = None,
+        state: str | None = None,
+        limit: int = 200,
+    ) -> list[JobRecord]:
+        await self._bind_worker()
+        stmt = select(_JOB_TABLE)
+        if self._scope is not None:
+            stmt = stmt.where(_JOB_TABLE.c.owner_id == self._scope.owner_id)
+        if industry_id is not None:
+            stmt = stmt.where(_JOB_TABLE.c.industry_id == industry_id)
+        if kind:
+            stmt = stmt.where(_JOB_TABLE.c.kind == kind)
+        if state:
+            stmt = stmt.where(_JOB_TABLE.c.state == state)
+        stmt = stmt.order_by(_JOB_TABLE.c.available_at.desc()).limit(limit)
+        rows = (await self._conn.execute(stmt)).all()
+        return [_job_record(row) for row in rows]
+
+    async def list_events_after(
+        self, job_id: UUID, after_seq: int, *, limit: int
+    ) -> list[dict[str, Any]]:
+        await self._bind_worker()
+        stmt = (
+            select(_EVENT_TABLE)
+            .where(_EVENT_TABLE.c.job_id == job_id, _EVENT_TABLE.c.seq > after_seq)
+            .order_by(_EVENT_TABLE.c.seq.asc())
+            .limit(limit)
+        )
+        if self._scope is not None:
+            stmt = stmt.where(_EVENT_TABLE.c.owner_id == self._scope.owner_id)
+        rows = (await self._conn.execute(stmt)).all()
+        return [
+            {"seq": row.seq, "kind": row.type, "payload": row.data or {}}
+            for row in rows
+        ]
+
+    async def earliest_event_seq(self, job_id: UUID) -> int | None:
+        await self._bind_worker()
+        stmt = select(func.min(_EVENT_TABLE.c.seq)).where(
+            _EVENT_TABLE.c.job_id == job_id
+        )
+        if self._scope is not None:
+            stmt = stmt.where(_EVENT_TABLE.c.owner_id == self._scope.owner_id)
+        row = (await self._conn.execute(stmt)).first()
+        if row is None or row[0] is None:
+            return None
+        return int(row[0])
+
+
+class SqlAlchemyJobEventLog:
+    """JobEventLog over job_events for SSE replay (07 §7)."""
+
+    def __init__(self, store: SqlAlchemyJobsStore) -> None:
+        self._store = store
+
+    async def events_after(
+        self, job_id: UUID, after_seq: int, *, limit: int
+    ) -> list[dict[str, Any]]:
+        return await self._store.list_events_after(job_id, after_seq, limit=limit)
+
+    async def earliest_seq(self, job_id: UUID) -> int | None:
+        return await self._store.earliest_event_seq(job_id)
+
+    async def job_is_active(self, job_id: UUID) -> bool:
+        job = await self._store.get_job(job_id)
+        if job is None:
+            return False
+        return job.state not in {"succeeded", "partial", "failed", "cancelled"}
+
 
 # --------------------------------------------------------------------------
 # in-memory adapter (dev/test)

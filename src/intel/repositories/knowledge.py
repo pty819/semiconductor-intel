@@ -24,27 +24,45 @@ documented deviation, ledgered.
 
 from __future__ import annotations
 
-from datetime import datetime
+import hashlib
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import bindparam, func, select
+from sqlalchemy import bindparam, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from intel.db.models.conversation import ReviewTask
 from intel.db.models.knowledge import (
+    Claim,
+    ClaimRevision,
     Entity,
     EntityAlias,
     Event,
+    EventLifecycleHistory,
+    EventMergeOperation,
     EventRevision,
+    EventRevisionClaim,
     Evidence,
+    SourceFamily,
     Watch,
 )
 from intel.db.rls import require_owner_guc, set_scope
 from intel.repositories.base import IndustryScope, ScopedRepository
 from intel.services.timeline import decode_cursor, encode_cursor
 
-__all__ = ["KnowledgeReadRepository", "SqlAlchemyKnowledgeRepository"]
+__all__ = [
+    "KnowledgeReadRepository",
+    "SqlAlchemyKnowledgeRepository",
+    "SqlAlchemyKnowledgeStore",
+]
+
+_UNKNOWN_TIME = {"precision": "unknown"}
+
+
+def _quote_sha256(exact_quote: str) -> str:
+    return hashlib.sha256(exact_quote.encode()).hexdigest()
 
 
 class KnowledgeReadRepository:
@@ -408,8 +426,6 @@ class SqlAlchemyKnowledgeRepository(ScopedRepository, KnowledgeReadRepository):
         }
 
     async def set_watch_status(self, watch_id: UUID, *, status: str) -> None:
-        from sqlalchemy import update
-
         await self._bind()
         await self.conn.execute(
             update(Watch)
@@ -418,4 +434,439 @@ class SqlAlchemyKnowledgeRepository(ScopedRepository, KnowledgeReadRepository):
                 Watch.id == watch_id,
             )
             .values(status=status, row_version=Watch.row_version + 1)
+        )
+
+
+class SqlAlchemyKnowledgeStore(ScopedRepository):
+    """Production KnowledgeStore over the Task-3 schema (RLS-bound)."""
+
+    def __init__(self, conn: AsyncConnection, scope: IndustryScope) -> None:
+        super().__init__(conn, scope)
+
+    async def _bind(self) -> UUID:
+        industry_id = self.scope.require_industry_id()
+        await set_scope(self.conn, self.owner_id, industry_id)
+        await require_owner_guc(self.conn)
+        return industry_id
+
+    async def find_source_family(
+        self, scope: IndustryScope, origin_ref: str
+    ) -> UUID | None:
+        industry_id = await self._bind()
+        stmt = (
+            select(SourceFamily.id)
+            .where(
+                SourceFamily.owner_id == self.owner_id,
+                SourceFamily.industry_id == industry_id,
+                SourceFamily.origin_url == origin_ref,
+            )
+            .limit(1)
+        )
+        row = (await self.conn.execute(stmt)).first()
+        return None if row is None else row[0]
+
+    async def insert_source_family(
+        self, scope: IndustryScope, *, origin_ref: str, label: str
+    ) -> UUID:
+        industry_id = await self._bind()
+        family_id = uuid4()
+        await self.conn.execute(
+            pg_insert(SourceFamily).values(
+                id=family_id,
+                owner_id=self.owner_id,
+                industry_id=industry_id,
+                label=label,
+                origin_url=origin_ref,
+                basis="explicit_reference",
+                status="confirmed",
+            )
+        )
+        return family_id
+
+    async def insert_claim_with_revision(
+        self,
+        scope: IndustryScope,
+        *,
+        text: str,
+        kind: str,
+        attribution: str | None,
+        predicate: str,
+        object_value: dict,
+        conditions: dict,
+        assessment: dict,
+        input_manifest: dict,
+    ) -> tuple[UUID, UUID]:
+        industry_id = await self._bind()
+        claim_id, revision_id = uuid4(), uuid4()
+        await self.conn.execute(
+            pg_insert(Claim).values(
+                id=claim_id,
+                owner_id=self.owner_id,
+                industry_id=industry_id,
+                state="active",
+                current_revision_id=None,
+            )
+        )
+        await self.conn.execute(
+            pg_insert(ClaimRevision).values(
+                id=revision_id,
+                owner_id=self.owner_id,
+                industry_id=industry_id,
+                claim_id=claim_id,
+                version=1,
+                text=text,
+                kind=kind,
+                predicate=predicate,
+                object_value=object_value,
+                conditions=conditions,
+                assessment=assessment,
+                input_manifest=input_manifest,
+            )
+        )
+        await self.conn.execute(
+            update(Claim)
+            .where(Claim.id == claim_id, Claim.owner_id == self.owner_id)
+            .values(current_revision_id=revision_id)
+        )
+        del attribution
+        return claim_id, revision_id
+
+    async def insert_evidence(
+        self,
+        scope: IndustryScope,
+        *,
+        claim_revision_id: UUID,
+        parsed_artifact_id: UUID,
+        block_id: str,
+        start_char: int,
+        end_char: int,
+        exact_quote: str,
+        relation: str,
+        semantic_support_status: str,
+        source_family_id: UUID | None,
+        extraction_run_id: UUID,
+    ) -> UUID:
+        industry_id = await self._bind()
+        evidence_id = uuid4()
+        await self.conn.execute(
+            pg_insert(Evidence).values(
+                id=evidence_id,
+                owner_id=self.owner_id,
+                industry_id=industry_id,
+                claim_revision_id=claim_revision_id,
+                parsed_artifact_id=parsed_artifact_id,
+                block_id=block_id,
+                start_char=start_char,
+                end_char=end_char,
+                exact_quote=exact_quote,
+                quote_sha256=_quote_sha256(exact_quote),
+                relation=relation,
+                semantic_support_status=semantic_support_status,
+                source_family_id=source_family_id,
+                extraction_run_id=extraction_run_id,
+            )
+        )
+        return evidence_id
+
+    async def find_event_by_key(
+        self, scope: IndustryScope, canonical_key: str
+    ) -> UUID | None:
+        industry_id = await self._bind()
+        stmt = (
+            select(Event.id)
+            .join(EventRevision, Event.current_revision_id == EventRevision.id)
+            .where(
+                Event.owner_id == self.owner_id,
+                Event.industry_id == industry_id,
+                Event.lifecycle == "active",
+                EventRevision.identity_key == canonical_key,
+            )
+            .limit(1)
+        )
+        row = (await self.conn.execute(stmt)).first()
+        return None if row is None else row[0]
+
+    async def insert_event_with_revision(
+        self,
+        scope: IndustryScope,
+        *,
+        event_type: str,
+        title: str,
+        summary: str,
+        identity_key: str | None,
+        rationale: str,
+        input_manifest: dict,
+    ) -> tuple[UUID, UUID]:
+        industry_id = await self._bind()
+        event_id, revision_id = uuid4(), uuid4()
+        now = datetime.now(UTC)
+        await self.conn.execute(
+            pg_insert(Event).values(
+                id=event_id,
+                owner_id=self.owner_id,
+                industry_id=industry_id,
+                event_type=event_type,
+                lifecycle="active",
+                current_revision_id=None,
+            )
+        )
+        await self.conn.execute(
+            pg_insert(EventRevision).values(
+                id=revision_id,
+                owner_id=self.owner_id,
+                industry_id=industry_id,
+                event_id=event_id,
+                version=1,
+                title=title,
+                summary=summary,
+                occurred_time=dict(_UNKNOWN_TIME),
+                published_time=dict(_UNKNOWN_TIME),
+                effective_time=dict(_UNKNOWN_TIME),
+                first_discovered_at=now,
+                identity_key=identity_key,
+                status="ok",
+                rationale=rationale,
+                input_manifest=input_manifest,
+            )
+        )
+        await self.conn.execute(
+            update(Event)
+            .where(Event.id == event_id, Event.owner_id == self.owner_id)
+            .values(current_revision_id=revision_id)
+        )
+        return event_id, revision_id
+
+    async def link_event_claims(
+        self, scope: IndustryScope, *, event_id: UUID, claim_revision_ids: list[UUID]
+    ) -> None:
+        industry_id = await self._bind()
+        row = (
+            await self.conn.execute(
+                select(Event.current_revision_id).where(
+                    Event.id == event_id,
+                    Event.owner_id == self.owner_id,
+                    Event.industry_id == industry_id,
+                )
+            )
+        ).first()
+        if row is None or row[0] is None:
+            return
+        revision_id = row[0]
+        for claim_revision_id in claim_revision_ids:
+            await self.conn.execute(
+                pg_insert(EventRevisionClaim)
+                .values(
+                    owner_id=self.owner_id,
+                    industry_id=industry_id,
+                    event_revision_id=revision_id,
+                    claim_revision_id=claim_revision_id,
+                    role="supporting",
+                )
+                .on_conflict_do_nothing()
+            )
+
+    async def record_possible_duplicate(
+        self,
+        scope: IndustryScope,
+        *,
+        event_id: UUID,
+        candidate_event_id: UUID | None,
+        reason: str,
+        input_manifest: dict,
+    ) -> UUID:
+        industry_id = await self._bind()
+        duplicate_id = uuid4()
+        await self.conn.execute(
+            pg_insert(ReviewTask).values(
+                id=duplicate_id,
+                owner_id=self.owner_id,
+                industry_id=industry_id,
+                type="possible_duplicate",
+                status="pending",
+                proposal={
+                    "event_id": str(event_id),
+                    "candidate_event_id": (
+                        str(candidate_event_id) if candidate_event_id else None
+                    ),
+                    "reason": reason,
+                    "input_manifest": input_manifest,
+                },
+                expected_versions={},
+            )
+        )
+        return duplicate_id
+
+    async def event_row_version(self, scope: IndustryScope, event_id: UUID) -> int:
+        industry_id = await self._bind()
+        row = (
+            await self.conn.execute(
+                select(Event.row_version).where(
+                    Event.id == event_id,
+                    Event.owner_id == self.owner_id,
+                    Event.industry_id == industry_id,
+                )
+            )
+        ).first()
+        if row is None:
+            raise KeyError(event_id)
+        return int(row[0])
+
+    async def _current_revision(self, event_id: UUID, industry_id: UUID) -> UUID:
+        row = (
+            await self.conn.execute(
+                select(Event.current_revision_id).where(
+                    Event.id == event_id,
+                    Event.owner_id == self.owner_id,
+                    Event.industry_id == industry_id,
+                )
+            )
+        ).first()
+        if row is None or row[0] is None:
+            raise KeyError(event_id)
+        return row[0]
+
+    async def save_merge(
+        self,
+        scope: IndustryScope,
+        *,
+        review_id: UUID,
+        canonical_id: UUID,
+        merged_id: UUID,
+        membership_snapshot: dict,
+        rationale: str,
+    ) -> UUID:
+        industry_id = await self._bind()
+        canonical_rev = await self._current_revision(canonical_id, industry_id)
+        merged_rev = await self._current_revision(merged_id, industry_id)
+        merge_id = uuid4()
+        snapshot = {
+            **membership_snapshot,
+            "review_id": str(review_id),
+            "rationale": rationale,
+            "canonical_row_version": await self.event_row_version(scope, canonical_id),
+            "merged_row_version": await self.event_row_version(scope, merged_id),
+        }
+        await self.conn.execute(
+            pg_insert(EventMergeOperation).values(
+                id=merge_id,
+                owner_id=self.owner_id,
+                industry_id=industry_id,
+                source_event_id=merged_id,
+                target_event_id=canonical_id,
+                source_revision_before=merged_rev,
+                target_revision_before=canonical_rev,
+                membership_snapshot=snapshot,
+                operation_status="applied",
+            )
+        )
+        return merge_id
+
+    async def mark_merged(
+        self, scope: IndustryScope, *, event_id: UUID, merged_into_id: UUID
+    ) -> None:
+        industry_id = await self._bind()
+        await self.conn.execute(
+            update(Event)
+            .where(
+                Event.id == event_id,
+                Event.owner_id == self.owner_id,
+                Event.industry_id == industry_id,
+            )
+            .values(
+                merged_into_id=merged_into_id,
+                lifecycle="merged",
+                row_version=Event.row_version + 1,
+            )
+        )
+        await self.conn.execute(
+            pg_insert(EventLifecycleHistory).values(
+                id=uuid4(),
+                owner_id=self.owner_id,
+                industry_id=industry_id,
+                event_id=event_id,
+                lifecycle="merged",
+            )
+        )
+
+    async def post_merge_modifications(
+        self, scope: IndustryScope, merge_id: UUID
+    ) -> int:
+        industry_id = await self._bind()
+        row = (
+            await self.conn.execute(
+                select(EventMergeOperation).where(
+                    EventMergeOperation.id == merge_id,
+                    EventMergeOperation.owner_id == self.owner_id,
+                    EventMergeOperation.industry_id == industry_id,
+                )
+            )
+        ).first()
+        if row is None:
+            return 0
+        merge = row[0]
+        snapshot = merge.membership_snapshot or {}
+        canonical = await self.event_row_version(scope, merge.target_event_id)
+        merged = await self.event_row_version(scope, merge.source_event_id)
+        extra = 0
+        if canonical > int(snapshot.get("canonical_row_version", canonical)):
+            extra += canonical - int(snapshot["canonical_row_version"])
+        # mark_merged bumps the merged event by 1; anything beyond is a later edit.
+        expected_merged = int(snapshot.get("merged_row_version", merged)) + 1
+        if merged > expected_merged:
+            extra += merged - expected_merged
+        return extra
+
+    async def undo_merge(
+        self, scope: IndustryScope, *, merge_id: UUID, compensation: dict | None
+    ) -> None:
+        industry_id = await self._bind()
+        row = (
+            await self.conn.execute(
+                select(EventMergeOperation).where(
+                    EventMergeOperation.id == merge_id,
+                    EventMergeOperation.owner_id == self.owner_id,
+                )
+            )
+        ).first()
+        if row is None:
+            return
+        merge = row[0]
+        if compensation is not None:
+            snapshot = dict(merge.membership_snapshot or {})
+            snapshot["_compensation"] = compensation
+            await self.conn.execute(
+                update(EventMergeOperation)
+                .where(EventMergeOperation.id == merge_id)
+                .values(membership_snapshot=snapshot)
+            )
+            return
+        await self.conn.execute(
+            update(Event)
+            .where(
+                Event.id == merge.source_event_id,
+                Event.owner_id == self.owner_id,
+                Event.industry_id == industry_id,
+            )
+            .values(
+                merged_into_id=None,
+                lifecycle="active",
+                row_version=Event.row_version + 1,
+            )
+        )
+        await self.conn.execute(
+            update(EventMergeOperation)
+            .where(EventMergeOperation.id == merge_id)
+            .values(
+                operation_status="undone",
+                undone_at=datetime.now(UTC),
+            )
+        )
+        await self.conn.execute(
+            pg_insert(EventLifecycleHistory).values(
+                id=uuid4(),
+                owner_id=self.owner_id,
+                industry_id=industry_id,
+                event_id=merge.source_event_id,
+                lifecycle="active",
+            )
         )

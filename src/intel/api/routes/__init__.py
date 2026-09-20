@@ -2,9 +2,17 @@
 
 from intel.api.routes import (
     auth,
+    conversations,
+    coverage,
+    documents,
     feeds,
+    generation_runs,
     industries,
+    jobs,
     knowledge,
+    reports,
+    reviews,
+    search,
     sources,
     topics,
 )
@@ -21,6 +29,14 @@ all_routers = (
     knowledge.entities_router,
     knowledge.watches_router,
     knowledge.evolutions_router,
+    conversations.router,
+    reviews.router,
+    reports.router,
+    search.router,
+    coverage.router,
+    jobs.router,
+    generation_runs.router,
+    documents.router,
 )
 
 __all__ = ["all_routers"]

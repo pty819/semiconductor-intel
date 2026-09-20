@@ -104,3 +104,17 @@ class ParserUnavailable(ServiceError):
 
     code = "parser_unavailable"
     http_status = 503
+
+
+class EventCursorExpiredError(ServiceError):
+    """SSE Last-Event-ID predates the retained log (07 §7, 08 §6)."""
+
+    code = "event_cursor_expired"
+    http_status = 409
+
+
+class ConversationTurnConflict(ServiceError):
+    """CHAT-04: parent_message_id / in-flight turn rejected (409)."""
+
+    code = "invalid_state_transition"
+    http_status = 409
