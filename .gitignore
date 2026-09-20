@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+
+# Environment / secrets
+.env
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node (frontend work in later tasks)
+node_modules/
+
+# Project artifacts
+traces/
+*.sqlite3
+
+# SDD / agent working files
+.superpowers/
