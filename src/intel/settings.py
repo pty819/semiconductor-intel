@@ -73,3 +73,17 @@ class Settings(BaseSettings):
     route_aliases: dict[str, str] = Field(
         default_factory=lambda: {"L1": "L1", "L2": "L2", "L3": "L3"}
     )
+
+    # -- NOOA middleware knobs (D16: 防失控) ----------------------------------
+    # Per-job LLM call ceiling counted in the llm_call middleware; exceeding
+    # it blocks the call (MW-01 budget leg) and fails the job.
+    llm_max_calls_per_job: int = 400
+    # execute_python defense-in-depth cap on captured stdout/stderr size
+    # (MW-03). NOOA's own sandbox limits stay primary; this is the app layer.
+    cell_output_max_chars: int = 100_000
+
+    # -- investigation gateway (14 §1 scoped tokens) --------------------------
+    # HMAC secret for gateway tool tokens. Empty FAILS CLOSED: the ToolGateway
+    # refuses to construct (the runner must inject a real secret at startup).
+    gateway_secret: str = ""
+    gateway_token_ttl_seconds: int = 3600

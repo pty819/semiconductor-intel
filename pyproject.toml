@@ -39,6 +39,13 @@ markers = ["integration: needs real Postgres", "live: needs network/provider"]
 addopts = "-m 'not integration and not live'"
 asyncio_mode = "auto"
 
+[tool.ruff.lint]
+# PIE790 (unnecessary `...`) MUST stay off: a docstring followed by `...`
+# is NOOA's generation-stub idiom — the ellipsis IS the marker that makes
+# the method LLM-generated. Removing it turns a generation method into a
+# plain Python method returning None.
+ignore = ["PIE790"]
+
 [tool.ruff.lint.per-file-ignores]
 # models.py is a byte-for-byte copy of the design pack (single source of
 # truth for DTOs). Its unused `datetime` import exists upstream; editing it
