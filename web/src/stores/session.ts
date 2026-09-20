@@ -1,13 +1,12 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { INDUSTRY_TEMPLATES } from '@/utils/labels'
 
-const INDUSTRIES = [
-  { id: 'ind-etch', name: 'Etching', status: 'active' as const },
-  { id: 'ind-pvd', name: 'PVD', status: 'draft' as const },
-  { id: 'ind-ceramic', name: '陶瓷材料', status: 'paused' as const },
-  { id: 'ind-algo', name: '智能化算法', status: 'draft' as const },
-  { id: 'ind-em', name: '电子显微镜', status: 'draft' as const },
-]
+export type IndustryRow = {
+  id: string
+  name: string
+  status: 'active' | 'draft' | 'paused' | 'archived'
+}
 
 export const useSessionStore = defineStore('session', () => {
   const user = ref<{ login: string } | null>({ login: 'liyifan' })
@@ -16,9 +15,16 @@ export const useSessionStore = defineStore('session', () => {
   const writePending = ref(false)
   const writeError = ref<string | null>(null)
   const lastDraft = ref<Record<string, unknown> | null>(null)
+  const industries = ref<IndustryRow[]>([
+    { id: 'ind-etch', name: 'Etching', status: 'active' },
+    { id: 'ind-pvd', name: 'PVD', status: 'draft' },
+    { id: 'ind-ceramic', name: '陶瓷材料', status: 'paused' },
+    { id: 'ind-algo', name: '智能化算法', status: 'draft' },
+    { id: 'ind-em', name: '电子显微镜', status: 'draft' },
+  ])
 
   const currentIndustry = computed(
-    () => INDUSTRIES.find((item) => item.id === industryId.value) ?? INDUSTRIES[0],
+    () => industries.value.find((item) => item.id === industryId.value) ?? industries.value[0],
   )
 
   function login(loginName: string) {
@@ -38,12 +44,23 @@ export const useSessionStore = defineStore('session', () => {
     industryId.value = id
   }
 
-  /** Writes wait for server confirmation; version conflicts keep the draft. */
+  function createFromTemplate(name: string) {
+    const id = `ind-${Date.now()}`
+    industries.value.push({ id, name, status: 'draft' })
+    lastDraft.value = { created: name, id }
+    return id
+  }
+
+  function setStatus(id: string, status: IndustryRow['status']) {
+    const row = industries.value.find((item) => item.id === id)
+    if (row) row.status = status
+  }
+
   async function submitWrite(draft: Record<string, unknown>, succeed = true) {
     lastDraft.value = { ...draft }
     writePending.value = true
     writeError.value = null
-    await new Promise((r) => setTimeout(r, 280))
+    await new Promise((r) => setTimeout(r, 180))
     writePending.value = false
     if (!succeed) {
       writeError.value = 'version_conflict：服务器版本已变，输入已保留供比较'
@@ -59,11 +76,14 @@ export const useSessionStore = defineStore('session', () => {
     writePending,
     writeError,
     lastDraft,
-    industries: INDUSTRIES,
+    industries,
+    templates: INDUSTRY_TEMPLATES,
     currentIndustry,
     login,
     logout,
     setIndustry,
+    createFromTemplate,
+    setStatus,
     submitWrite,
   }
 })

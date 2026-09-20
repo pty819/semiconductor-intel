@@ -23,6 +23,7 @@ export const router = createRouter({
         { path: 'settings', name: 'industry-settings', component: () => import('@/pages/Settings.vue') },
       ],
     },
+    { path: '/sources', name: 'sources', component: () => import('@/pages/Sources.vue') },
     { path: '/runs', name: 'runs', component: () => import('@/pages/RunCenter.vue') },
     { path: '/account', name: 'account', component: () => import('@/pages/Settings.vue') },
   ],

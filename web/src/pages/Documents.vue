@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useMockStore } from '@/stores/mock'
 import { useSessionStore } from '@/stores/session'
 import CoverageBadge from '@/components/CoverageBadge.vue'
+import { PARSE_LABEL, SCOPE_LABEL } from '@/utils/labels'
 
 const mock = useMockStore()
 const session = useSessionStore()
@@ -15,8 +16,9 @@ const draft = ref('https://example.com/import')
     <ul>
       <li v-for="doc in mock.documents" :key="doc.id">
         {{ doc.title }}
-        <CoverageBadge :label="String(doc.retrieval_scope)" :tone="doc.retrieval_scope === 'fulltext' ? 'ok' : 'warn'" />
-        <CoverageBadge :label="String(doc.parse_status)" />
+        <CoverageBadge :label="SCOPE_LABEL[doc.retrieval_scope] ?? doc.retrieval_scope" :tone="doc.retrieval_scope === 'fulltext' ? 'ok' : 'warn'" />
+        <CoverageBadge :label="PARSE_LABEL[doc.parse_status] ?? doc.parse_status" :tone="doc.parse_status === 'failed' ? 'bad' : 'info'" />
+        <span v-if="doc.id === 'doc-4'">未归类</span>
       </li>
     </ul>
     <form @submit.prevent="session.submitWrite({ url: draft })">

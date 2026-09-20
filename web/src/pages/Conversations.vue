@@ -13,10 +13,15 @@ const insufficient = ref(false)
 function ask() {
   if (mock.qaMode === 'archive' && !question.value.includes('E-500')) {
     insufficient.value = true
+    mock.messages.push({
+      id: `gap-${Date.now()}`,
+      role: 'assistant',
+      text: '归档模式无足够证据。',
+    })
     return
   }
   insufficient.value = false
-  mock.startSseMock()
+  mock.ask(question.value, mock.qaMode)
   void session.submitWrite({ question: question.value, mode: mock.qaMode })
 }
 </script>
@@ -33,18 +38,18 @@ function ask() {
     <button type="button" @click="mock.dropSse">模拟断线</button>
     <ol>
       <li v-for="msg in mock.messages" :key="msg.id">
-        <strong>{{ msg.role }}</strong> {{ msg.text }}
+        <strong>{{ msg.role === 'user' ? '用户' : '助手' }}</strong> {{ msg.text }}
         <button v-if="msg.role === 'assistant'" type="button" @click="ui.evidenceOpen = true">依据</button>
       </li>
     </ol>
     <p v-if="insufficient" class="banner warn">
       归档模式无足够证据。
-      <button type="button" @click="mock.qaMode = 'online'">转为在线调查（新消息，保留原回答）</button>
+      <button type="button" @click="mock.convertToOnline(question); insufficient = false">转为在线调查（新消息，保留原回答）</button>
     </p>
     <form @submit.prevent="ask">
       <input v-model="question" placeholder="提问" />
       <button type="submit">发送</button>
-      <button type="button">取消</button>
+      <button type="button" @click="mock.cancelJob('job-1')">取消</button>
     </form>
   </section>
 </template>

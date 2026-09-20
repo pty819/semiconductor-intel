@@ -32,7 +32,7 @@ const nav = [
         <span class="name">{{ session.currentIndustry.name }}</span>
       </div>
       <nav class="top-actions">
-        <router-link to="/industries">领域列表</router-link>
+        <router-link to="/sources">采集来源</router-link>
         <router-link to="/runs">运行中心</router-link>
         <router-link to="/account">账号设置</router-link>
         <button type="button" class="linkish" @click="session.logout(); $router.push('/login')">退出</button>

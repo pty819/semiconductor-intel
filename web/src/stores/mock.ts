@@ -23,6 +23,11 @@ export const useMockStore = defineStore('mock', () => {
   const qaMode = ref<'archive' | 'online'>('archive')
   const ssePhase = ref('空闲')
   const sseConnected = ref(true)
+  const eventTypeFilter = ref('all')
+  const topicMatch = ref<'or' | 'and'>('or')
+  const sortBy = ref<'occurred' | 'discovered'>('occurred')
+  const cancelled = ref(false)
+  let es: EventSource | null = null
 
   const topics = [
     { id: 'top-rf', name: 'RF / 射频' },
@@ -103,6 +108,8 @@ export const useMockStore = defineStore('mock', () => {
   const documents = [
     { id: 'doc-1', title: 'OES 终点检测论文', retrieval_scope: 'fulltext', parse_status: 'ok' },
     { id: 'doc-2', title: '厂商新闻稿（仅摘要）', retrieval_scope: 'abstract', parse_status: 'partial' },
+    { id: 'doc-3', title: '登录墙页面', retrieval_scope: 'metadata', parse_status: 'failed' },
+    { id: 'doc-4', title: '未归类备忘', retrieval_scope: 'partial', parse_status: 'ok' },
   ]
 
   const coverage = { fulltext: 7, total: 12, abstract: 3, failed: 2 }
@@ -124,10 +131,10 @@ export const useMockStore = defineStore('mock', () => {
     ],
   }
 
-  const messages = [
+  const messages = ref([
     { id: 'msg-u1', role: 'user' as const, text: 'E-500 最新动态？' },
     { id: 'msg-a1', role: 'assistant' as const, text: '正式商用，见引用。' },
-  ]
+  ])
 
   const reports = [
     { id: 'rep-1', title: 'Etching 日报', stale: true, coverage: 1 },
@@ -137,10 +144,10 @@ export const useMockStore = defineStore('mock', () => {
     { id: 'rv-1', type: 'event_merge', status: 'pending', row_version: 4, summary: '合并重复商用公告' },
   ]
 
-  const jobs = [
+  const jobs = ref([
     { id: 'job-1', kind: 'archive_answer', state: 'running', error_code: null as string | null },
     { id: 'job-2', kind: 'extract', state: 'failed', error_code: 'parser_unavailable' },
-  ]
+  ])
 
   const generation = {
     step_key: 'extract_claims',
@@ -152,19 +159,59 @@ export const useMockStore = defineStore('mock', () => {
   const locate = computed(() => locateQuoteInParse(parse, evidence))
 
   function startSseMock() {
+    cancelled.value = false
     sseConnected.value = true
     ssePhase.value = 'retrieving'
+    es?.close()
+    es = {
+      close() {
+        sseConnected.value = false
+      },
+    } as EventSource
+    sseConnected.value = true
     window.setTimeout(() => {
-      ssePhase.value = 'extracting'
+      if (!cancelled.value) ssePhase.value = 'extracting · 资料 3 · 引用已验证 1'
     }, 400)
     window.setTimeout(() => {
-      ssePhase.value = 'completed'
+      if (!cancelled.value) ssePhase.value = 'completed'
+      es?.close()
     }, 900)
   }
 
   function dropSse() {
+    es?.close()
     sseConnected.value = false
     ssePhase.value = 'SSE 断开，已降级轮询'
+  }
+
+  function ask(text: string, mode: 'archive' | 'online') {
+    messages.value.push({ id: `u-${Date.now()}`, role: 'user', text: `${mode}: ${text}` })
+    startSseMock()
+  }
+
+  function convertToOnline(original: string) {
+    messages.value.push({
+      id: `a-gap-${Date.now()}`,
+      role: 'assistant',
+      text: '归档模式证据不足（原回答保留）。',
+    })
+    qaMode.value = 'online'
+    ask(original || '继续调查', 'online')
+  }
+
+  function cancelJob(id: string) {
+    cancelled.value = true
+    const job = jobs.value.find((item) => item.id === id)
+    if (job) job.state = 'cancelled'
+    dropSse()
+  }
+
+  function visibleEvents() {
+    let rows = events.slice()
+    if (eventTypeFilter.value !== 'all') {
+      rows = rows.filter((item) => item.event_type === eventTypeFilter.value)
+    }
+    return rows
   }
 
   return {
@@ -174,6 +221,9 @@ export const useMockStore = defineStore('mock', () => {
     qaMode,
     ssePhase,
     sseConnected,
+    eventTypeFilter,
+    topicMatch,
+    sortBy,
     topics,
     events,
     evidence,
@@ -191,5 +241,9 @@ export const useMockStore = defineStore('mock', () => {
     locate,
     startSseMock,
     dropSse,
+    ask,
+    convertToOnline,
+    cancelJob,
+    visibleEvents,
   }
 })

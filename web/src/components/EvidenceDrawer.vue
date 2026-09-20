@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { SCOPE_LABEL, SUPPORT_LABEL } from '@/utils/labels'
 import { useMockStore } from '@/stores/mock'
 
 const props = defineProps<{ open: boolean }>()
@@ -14,6 +15,12 @@ watch(
   },
 )
 
+function onKey(ev: KeyboardEvent) {
+  if (ev.key === 'Escape' && props.open) emit('close')
+}
+onMounted(() => window.addEventListener('keydown', onKey))
+onUnmounted(() => window.removeEventListener('keydown', onKey))
+
 const locate = computed(() => mock.locate)
 </script>
 
@@ -24,14 +31,14 @@ const locate = computed(() => mock.locate)
       <button type="button" @click="emit('close')">关闭</button>
     </header>
     <ol class="layers">
-      <li :class="{ on: layer === 1 }"><button type="button" @click="layer = 1">1 引用</button></li>
-      <li :class="{ on: layer === 2 }"><button type="button" @click="layer = 2">2 claim 与条件</button></li>
-      <li :class="{ on: layer === 3 }"><button type="button" @click="layer = 3">3 原文高亮（parse_id）</button></li>
-      <li :class="{ on: layer === 4 }"><button type="button" @click="layer = 4">4 快照版本</button></li>
+      <li><button type="button" :class="{ current: layer === 1 }" @click="layer = 1">1 引用</button></li>
+      <li><button type="button" :class="{ current: layer === 2 }" @click="layer = 2">2 claim 与条件</button></li>
+      <li><button type="button" :class="{ current: layer === 3 }" @click="layer = 3">3 原文高亮（parse_id）</button></li>
+      <li><button type="button" :class="{ current: layer === 4 }" @click="layer = 4">4 快照版本</button></li>
     </ol>
     <section v-if="layer === 1">
       <p>引用 cit-1 → evidence {{ mock.evidence.id }}</p>
-      <p>来源陈述 · 独立验证未知 · 存在反驳：否 · 覆盖 {{ mock.evidence.retrieval_scope }}</p>
+      <p>{{ SUPPORT_LABEL[mock.evidence.semantic_support] }} · {{ SCOPE_LABEL[mock.evidence.retrieval_scope] }}</p>
     </section>
     <section v-else-if="layer === 2">
       <blockquote>{{ mock.claim.text }}</blockquote>

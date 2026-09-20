@@ -7,8 +7,9 @@ import EventCard from '@/components/EventCard.vue'
 
 const mock = useMockStore()
 const ui = useUiStore()
-const known = computed(() => mock.events.filter((e) => e.occurred_time.precision !== 'unknown'))
-const unknown = computed(() => mock.events.filter((e) => e.occurred_time.precision === 'unknown'))
+const rows = computed(() => mock.visibleEvents())
+const known = computed(() => rows.value.filter((e) => e.occurred_time.precision !== 'unknown'))
+const unknown = computed(() => rows.value.filter((e) => e.occurred_time.precision === 'unknown'))
 </script>
 
 <template>
