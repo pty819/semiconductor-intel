@@ -318,7 +318,7 @@ class AnswerAgent(Agent):
         """
         ...
 
-    @strategy(PredictStrategy(), llm=lambda self: route_client(self, "L3"))
+    @strategy(PredictStrategy(), llm=lambda self: route_client(self, "L2"))
     async def compose_report(self, brief: str, materials: list[dict]) -> ReportDraft:
         """Compose the report sections from the materials.
         Follow the brief's structure. Every claim carries an evidence

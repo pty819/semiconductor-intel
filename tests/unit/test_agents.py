@@ -105,6 +105,41 @@ class TestRoutesYaml:
         with pytest.raises(ValueError):
             route_client(RoutingAgent(llm=FakeLLMClient()), "L9")
 
+    def test_method_tier_assignments_match_spec_14_3_1(self) -> None:
+        """14 §3.1 tier table: L1 量大浅判 / L2 结构化抽取与撰写 / L3 判断
+        与综合 — compose_report is 撰写 (L2), not judgement (L3)."""
+        import inspect
+
+        from intel.nooa_adapter.agents import (
+            AnswerAgent,
+            EvolutionAgent,
+            ExtractionAgent,
+            QueryPlannerAgent,
+            RelationAgent,
+        )
+
+        expected = {
+            (RoutingAgent, "describe_document"): "L1",
+            (RoutingAgent, "judge_industry"): "L1",
+            (RoutingAgent, "judge_topics"): "L1",
+            (ExtractionAgent, "extract_claims"): "L2",
+            (ExtractionAgent, "propose_events"): "L2",
+            (RelationAgent, "assess_duplicate"): "L3",
+            (RelationAgent, "assess_relation"): "L3",
+            (EvolutionAgent, "compose_evolution"): "L3",
+            (AnswerAgent, "compose_answer"): "L2",
+            (AnswerAgent, "compose_report"): "L2",
+            (QueryPlannerAgent, "resolve_followup"): "L2",
+            (InvestigationAgent, "investigate"): "L3",
+        }
+        for (cls, method_name), tier in expected.items():
+            source = inspect.getsource(getattr(cls, method_name))
+            assert f'route_client(self, "{tier}")' in source, (
+                cls.__name__,
+                method_name,
+                tier,
+            )
+
 
 class TestScopedTokens:
     def _token(self, *, actions=None, ttl=60, **kwargs) -> str:
