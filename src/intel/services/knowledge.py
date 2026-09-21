@@ -199,6 +199,23 @@ class KnowledgeStore(Protocol):
         self, scope: IndustryScope, *, merge_id: UUID, compensation: dict | None
     ) -> None: ...
 
+    async def mark_derived_stale(
+        self,
+        scope: IndustryScope,
+        *,
+        event_ids: Sequence[UUID],
+        reason: str,
+        marked_at: datetime,
+    ) -> int:
+        """Staleness write path (05 §4 / spec 03 §6): for every derived
+        report revision whose evidence chain reaches one of ``event_ids``,
+        write the ``dependency_edges`` row (source event_revision →
+        derived report_revision) and the ``derived_status`` stale mark in
+        the CALLER's transaction, plus one audit_log entry (the audit
+        writer pattern). Returns the number of derived revisions marked
+        (already-stale rows keep their original stale_since — the
+        StalePolicy debounce keys off the first mark)."""
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -418,6 +435,18 @@ async def apply_event_merge(
         rationale=rationale,
     )
     await store.mark_merged(scope, event_id=merged_id, merged_into_id=canonical_id)
+    # Staleness write path (05 §4): a merge changes the events' claim
+    # membership, so reports derived from either event's evidence are now
+    # derived from changed inputs — mark them stale in the SAME
+    # transaction (dependency_edges + derived_status + audit).
+    await store.mark_derived_stale(
+        scope,
+        event_ids=[canonical_id, merged_id],
+        reason=(
+            f"event merge {merged_id} into {canonical_id} (merge {merge_id}, 05 §4)"
+        ),
+        marked_at=_now(),
+    )
     return merge_id
 
 
@@ -465,6 +494,12 @@ class InMemoryKnowledgeStore:
     merges: dict[UUID, dict] = field(default_factory=dict)
     post_merge_edit_count: dict[UUID, int] = field(default_factory=dict)
     undone: list[UUID] = field(default_factory=list)
+    #: derived report revisions per event (seeded by tests):
+    #: event_id -> [(object_type, revision_id), ...]
+    derived_by_event: dict[UUID, list[tuple[str, UUID]]] = field(default_factory=dict)
+    stale_marks: list[dict] = field(default_factory=list)
+    stale_edges: list[dict] = field(default_factory=list)
+    stale_audits: list[dict] = field(default_factory=list)
 
     async def find_source_family(
         self, scope: IndustryScope, origin_ref: str
@@ -677,3 +712,56 @@ class InMemoryKnowledgeStore:
             self.events[merged_id]["merged_into_id"] = None
             self.events[merged_id]["row_version"] += 1
             self.undone.append(merge_id)
+
+    async def mark_derived_stale(
+        self,
+        scope: IndustryScope,
+        *,
+        event_ids: Sequence[UUID],
+        reason: str,
+        marked_at: datetime,
+    ) -> int:
+        already_stale = {
+            (mark["object_type"], mark["revision_id"]) for mark in self.stale_marks
+        }
+        existing_edges = {
+            (edge["source_revision_id"], edge["derived_revision_id"])
+            for edge in self.stale_edges
+        }
+        marked = 0
+        for event_id in event_ids:
+            revision_id = self.events.get(event_id, {}).get("current_revision_id")
+            for object_type, derived_id in self.derived_by_event.get(event_id, []):
+                if (revision_id, derived_id) not in existing_edges:
+                    self.stale_edges.append(
+                        {
+                            "source_type": "event_revision",
+                            "source_revision_id": revision_id,
+                            "derived_type": object_type,
+                            "derived_revision_id": derived_id,
+                        }
+                    )
+                    existing_edges.add((revision_id, derived_id))
+                if (object_type, derived_id) in already_stale:
+                    continue  # first stale_since stands (StalePolicy debounce)
+                self.stale_marks.append(
+                    {
+                        "object_type": object_type,
+                        "revision_id": derived_id,
+                        "stale_since": marked_at,
+                        "reason": reason,
+                    }
+                )
+                already_stale.add((object_type, derived_id))
+                marked += 1
+        self.stale_audits.append(
+            {
+                "action": "derived.marked_stale",
+                "target_type": "report",
+                "event_ids": [str(event_id) for event_id in event_ids],
+                "reason": reason,
+                "marked": marked,
+                "recorded_at": marked_at,
+            }
+        )
+        return marked

@@ -453,6 +453,36 @@ class TestEvt04MergeUndo:
         assert store.events[duplicate.event_id]["merged_into_id"] is None
         assert merge_id in store.undone
 
+    async def test_merge_marks_derived_reports_stale(self) -> None:
+        """I-10: the merge transaction writes dependency_edges +
+        derived_status (+ audit) for reports derived from either event —
+        the StalePolicy debounce consumes the stale_since marks."""
+        store = InMemoryKnowledgeStore()
+        canonical, duplicate, versions = await self._merged_pair(store)
+        derived_report = uuid4()
+        store.derived_by_event[canonical.event_id] = [("report", derived_report)]
+
+        merge_id = await apply_event_merge(
+            store,
+            SCOPE,
+            canonical_id=canonical.event_id,
+            merged_id=duplicate.event_id,
+            expected_row_versions=versions,
+            review_id=uuid4(),
+            rationale="dup",
+            membership_snapshot={"claims": []},
+        )
+
+        assert [mark["revision_id"] for mark in store.stale_marks] == [derived_report]
+        assert store.stale_marks[0]["stale_since"] is not None
+        assert str(merge_id) in store.stale_marks[0]["reason"]
+        edge = store.stale_edges[0]
+        assert edge["derived_revision_id"] == derived_report
+        assert edge["source_type"] == "event_revision"
+        audit = store.stale_audits[-1]
+        assert audit["action"] == "derived.marked_stale"
+        assert audit["marked"] == 1
+
     async def test_undo_after_modification_conflicts_with_compensation(self) -> None:
         store = InMemoryKnowledgeStore()
         canonical, duplicate, versions = await self._merged_pair(store)

@@ -25,7 +25,7 @@ documented deviation, ledgered.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -955,3 +955,135 @@ class SqlAlchemyKnowledgeStore(ScopedRepository):
                 lifecycle="active",
             )
         )
+
+    async def mark_derived_stale(
+        self,
+        scope: IndustryScope,
+        *,
+        event_ids: Sequence[UUID],
+        reason: str,
+        marked_at: datetime,
+    ) -> int:
+        """Staleness write path (05 §4 / spec 03 §6), one transaction.
+
+        Derived reports are found through the evidence chain: the events'
+        current revisions → their claim revisions → evidence cited by
+        report_citations. Each (source event revision, derived report
+        revision) pair gains a dependency_edges row (idempotent — the
+        same edge is never written twice) and a derived_status stale mark
+        (insert-once: an already-stale row keeps its original
+        stale_since, which the StalePolicy debounce keys off). One
+        audit_log row summarizes the marking (the audit-writer pattern:
+        只记录必要差异, 不记录秘密).
+        """
+        from intel.db.models.conversation import (
+            AuditLog,
+            DependencyEdge,
+            DerivedStatus,
+            ReportCitation,
+        )
+
+        industry_id = await self._bind()
+        if not event_ids:
+            return 0
+
+        # events → current revisions → claims → evidence → report citations
+        pairs = (
+            (
+                await self.conn.execute(
+                    select(
+                        Event.current_revision_id.label("event_revision_id"),
+                        ReportCitation.report_revision_id,
+                    )
+                    .select_from(Event)
+                    .join(
+                        EventRevisionClaim,
+                        EventRevisionClaim.event_revision_id
+                        == Event.current_revision_id,
+                    )
+                    .join(
+                        Evidence,
+                        Evidence.claim_revision_id
+                        == EventRevisionClaim.claim_revision_id,
+                    )
+                    .join(ReportCitation, ReportCitation.evidence_id == Evidence.id)
+                    .where(
+                        Event.owner_id == self.owner_id,
+                        Event.industry_id == industry_id,
+                        Event.id.in_(list(event_ids)),
+                    )
+                    .distinct()
+                )
+            ).all()
+        ) or []
+
+        marked = 0
+        first_target = uuid4()
+        for event_revision_id, report_revision_id in pairs:
+            first_target = report_revision_id
+            existing_edge = (
+                await self.conn.execute(
+                    select(DependencyEdge.id).where(
+                        DependencyEdge.owner_id == self.owner_id,
+                        DependencyEdge.industry_id == industry_id,
+                        DependencyEdge.source_type == "event_revision",
+                        DependencyEdge.source_revision_id == event_revision_id,
+                        DependencyEdge.derived_type == "report",
+                        DependencyEdge.derived_revision_id == report_revision_id,
+                    )
+                )
+            ).first()
+            if existing_edge is None:
+                await self.conn.execute(
+                    pg_insert(DependencyEdge).values(
+                        id=uuid4(),
+                        owner_id=self.owner_id,
+                        industry_id=industry_id,
+                        source_type="event_revision",
+                        source_revision_id=event_revision_id,
+                        derived_type="report",
+                        derived_revision_id=report_revision_id,
+                    )
+                )
+            existing_status = (
+                await self.conn.execute(
+                    select(DerivedStatus.id).where(
+                        DerivedStatus.owner_id == self.owner_id,
+                        DerivedStatus.industry_id == industry_id,
+                        DerivedStatus.object_type == "report",
+                        DerivedStatus.revision_id == report_revision_id,
+                    )
+                )
+            ).first()
+            if existing_status is None:
+                await self.conn.execute(
+                    pg_insert(DerivedStatus).values(
+                        id=uuid4(),
+                        owner_id=self.owner_id,
+                        industry_id=industry_id,
+                        object_type="report",
+                        revision_id=report_revision_id,
+                        stale_since=marked_at,
+                        reason=reason,
+                    )
+                )
+                marked += 1
+
+        await self.conn.execute(
+            pg_insert(AuditLog).values(
+                id=uuid4(),
+                owner_id=self.owner_id,
+                industry_id=industry_id,
+                actor_type="service",
+                actor_id=self.owner_id,
+                action="derived.marked_stale",
+                target_type="report",
+                target_id=first_target,
+                details={
+                    "event_ids": [str(event_id) for event_id in event_ids],
+                    "reason": reason,
+                    "marked": marked,
+                },
+            )
+        )
+        return marked

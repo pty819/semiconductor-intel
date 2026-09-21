@@ -101,3 +101,24 @@ class TestSqlAlchemyKnowledgeStore:
         )
         assert conn.statements  # RLS bind + writes
         del event_rev
+
+    async def test_mark_derived_stale_writes_audit_in_same_txn(self) -> None:
+        """I-10 SQL shape: no derived pairs found (fake returns no rows)
+        still writes the audit_log row; the join chain and the
+        dependency_edges/derived_status selects are issued."""
+        from datetime import UTC, datetime
+
+        conn = FakeConn()
+        store = SqlAlchemyKnowledgeStore(conn, SCOPE)
+        event_id = uuid4()
+        marked = await store.mark_derived_stale(
+            SCOPE,
+            event_ids=[event_id],
+            reason="event merge (05 §4)",
+            marked_at=datetime.now(UTC),
+        )
+        assert marked == 0
+        sql = [str(stmt) for stmt in conn.statements]
+        assert any("report_citations" in text for text in sql)
+        assert any("event_revision_claims" in text for text in sql)
+        assert any("INSERT INTO AUDIT_LOG" in text.upper() for text in sql)
