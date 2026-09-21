@@ -34,6 +34,10 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          # Match local dev: PEP-695 generic classes (e.g. pagination.Page[T])
+          # are documented differently on 3.12 and trip duplicate-object
+          # warnings under sphinx autodoc.
+          python-version: "3.13"
 
       # NOOA arrives as a git dependency pinned in pyproject.toml — uv
       # clones it straight from GitHub during sync.
