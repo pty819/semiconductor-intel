@@ -1,7 +1,7 @@
 # semiconductor-intel compose (spec 10 §4).
 #
-# Default runtime: Postgres and the OpenAI-v1 LLM on 192.168.1.82.
-# NAS 192.168.1.21 is optional (HOST= in deploy/postgres/setup.sh) and is
+# Default runtime: Postgres and the OpenAI-v1 LLM on your-database-host.
+# NAS your-nas-host is optional (HOST= in deploy/postgres/setup.sh) and is
 # NOT required for this stack.
 #
 #   docker compose -f deploy/compose.yaml config
@@ -17,10 +17,10 @@
 name: semiconductor-intel
 
 x-app-environment: &app-environment
-  INTEL_DATABASE_URL: ${INTEL_DATABASE_URL:-postgresql+asyncpg://postgres:${PG_PASSWORD}@192.168.1.82:5432/postgres}
+  INTEL_DATABASE_URL: ${INTEL_DATABASE_URL:-postgresql+asyncpg://postgres:${PG_PASSWORD}@your-database-host:5432/postgres}
   INTEL_OBJECT_STORE_ROOT: ${INTEL_OBJECT_STORE_ROOT:-/var/lib/intel/objects}
   INTEL_SESSION_PEPPER: ${INTEL_SESSION_PEPPER:-dev-only-session-pepper-change-me}
-  INTEL_LLM_BASE_URL: ${INTEL_LLM_BASE_URL:-http://192.168.1.82:8080/v1}
+  INTEL_LLM_BASE_URL: ${INTEL_LLM_BASE_URL:-http://localhost:8080/v1}
   INTEL_LLM_API_KEY: ${INTEL_LLM_API_KEY:-}
   LLM_API_KEY: ${LLM_API_KEY:-}
   INTEL_GATEWAY_SECRET: ${INTEL_GATEWAY_SECRET:-}

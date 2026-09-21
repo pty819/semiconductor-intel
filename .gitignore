@@ -26,3 +26,4 @@ traces/
 
 web/dist/
 web/node_modules/
+docs/_build/

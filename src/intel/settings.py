@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # or direct). Default: 82 llamacpp. Env names, INTEL_-prefixed first;
     # the legacy GROK2API_* spellings keep older .env files working.
     llm_base_url: str = Field(
-        default="http://192.168.1.82:8080/v1",
+        default="http://localhost:8080/v1",
         validation_alias=AliasChoices(
             "intel_llm_base_url",
             "llm_base_url",

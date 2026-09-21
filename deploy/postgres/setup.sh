@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # setup.sh — build and start the semiconductor-intel Postgres container on
 # ANY podman host over ssh. Arch-agnostic Containerfile; tested targets:
-#   - the NAS  (liyifan@192.168.1.21, Armbian aarch64, podman 5.7.0)
-#   - the x86 server (192.168.1.82) — faster builds, same image semantics
+#   - the NAS  (liyifan@your-nas-host, Armbian aarch64, podman 5.7.0)
+#   - the x86 server (your-database-host) — faster builds, same image semantics
 # Select with HOST=... (or the legacy NAS_HOST=... spelling).
 #
 # Running it ssh's to the host, builds the image (30-60 min on the NAS,
@@ -18,7 +18,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-HOST="${HOST:-${NAS_HOST:-liyifan@192.168.1.21}}"
+HOST="${HOST:-${NAS_HOST:-liyifan@your-nas-host}}"
 CONTAINER_NAME="${CONTAINER_NAME:-semiconductor-intel-pg}"
 IMAGE_TAG="${IMAGE_TAG:-semiconductor-intel-pg:18}"
 HOST_PORT="${HOST_PORT:-5432}"
@@ -36,7 +36,7 @@ Usage: PG_PASSWORD=... ./setup.sh [-p <password>] [HOST=...]
   -p <password>   Postgres superuser password (alternative to PG_PASSWORD env)
 
 Environment overrides:
-  HOST (liyifan@192.168.1.21; NAS_HOST accepted as the legacy spelling)
+  HOST (liyifan@your-nas-host; NAS_HOST accepted as the legacy spelling)
   CONTAINER_NAME (semiconductor-intel-pg)  IMAGE_TAG (semiconductor-intel-pg:18)
   HOST_PORT (5432)   REMOTE_BASE (~/semiconductor-intel)   MEM_LIMIT (5g)
 
@@ -44,7 +44,7 @@ Examples:
   # NAS (aarch64) — host port 5433 (5432 is taken by a host-level service):
   HOST_PORT=5433 PG_PASSWORD=... ./setup.sh
   # x86 server .82:
-  HOST=liyifan@192.168.1.82 PG_PASSWORD=... ./setup.sh
+  HOST=liyifan@your-database-host PG_PASSWORD=... ./setup.sh
 USAGE
 }
 

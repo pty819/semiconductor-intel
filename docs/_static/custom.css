@@ -1,0 +1,10 @@
+/* Slightly tighten CJK line height in code blocks and tables. */
+.rst-content pre.literal-block,
+.rst-content div[class^='highlight'] pre {
+  line-height: 1.45;
+}
+
+.wy-table-responsive table td,
+.wy-table-responsive table th {
+  white-space: normal;
+}

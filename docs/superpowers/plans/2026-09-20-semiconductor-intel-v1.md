@@ -8,19 +8,19 @@
 
 **Tech Stack:** Python 3.12 + uv、FastAPI、SQLAlchemy 2 async + Alembic、PostgreSQL 18（BM25: pg_textsearch + pg_jieba；向量: pgvector + pgvectorscale diskann）、React+TS+Vite+TanStack Query、NOOA @ d4d46f7。
 
-**Spec:** `/Users/liyifan/Documents/Codex/2026-09-19-agent/semiconductor-intel-design/`（README + docs/01–16 + contracts/）。本计划的任务引用规格章节时，以规格的精确字段/路由表为准，执行者须同时读规格对应节。
+**Spec:** `<local design-pack checkout>/`（README + docs/01–16 + contracts/）。本计划的任务引用规格章节时，以规格的精确字段/路由表为准，执行者须同时读规格对应节。
 
 ## Global Constraints
 
-- NOOA 固定提交 `d4d46f78ae0eeaed7d18a466196601e8d16bc101`，本地路径 `/Users/liyifan/Documents/labs-OO-Agents`，以 uv path 依赖（editable）接入；**不修改 NOOA 源码**。
+- NOOA 固定提交 `d4d46f78ae0eeaed7d18a466196601e8d16bc101`，本地路径 `<local NOOA checkout>`，以 uv path 依赖（editable）接入；**不修改 NOOA 源码**。
 - Python `>=3.12,<3.14`；包管理只用 uv；前端 Node LTS + pnpm。
 - 用户隔离：所有 O/I 表 RLS ENABLE+FORCE，应用角色非 owner；owner_id 一律来自 session；复合 scope 外键（规格 docs/03 §1）。
 - 模型产候选、业务代码验证提交；Pydantic 类型正确≠证据真实（规格 README 约束 9）。
 - 完整增量采集：采集前不按主题/标题/top-k 丢弃文档（规格 README 约束 3）。
-- 数据库：NAS `liyifan@192.168.1.21`（aarch64 Armbian, podman 5.7.0）新起 `postgres:18` 容器 `semiconductor-intel-pg`，发布宿主 `5432`；扩展 pg_textsearch/pg_jieba/pgvectorscale(+pgvector CASCADE) 随镜像构建。**不触碰 NAS 上既有 postgres-server（pgduckdb）**。
-- LLM：grok2api `http://192.168.1.21:8000/v1`（OpenAI 兼容）；API key 经 env `GROK2API_KEY` 注入，不入库不入 git。
+- 数据库：NAS `liyifan@your-nas-host`（aarch64 Armbian, podman 5.7.0）新起 `postgres:18` 容器 `semiconductor-intel-pg`，发布宿主 `5432`；扩展 pg_textsearch/pg_jieba/pgvectorscale(+pgvector CASCADE) 随镜像构建。**不触碰 NAS 上既有 postgres-server（pgduckdb）**。
+- LLM：grok2api `http://your-nas-host:8000/v1`（OpenAI 兼容）；API key 经 env `GROK2API_KEY` 注入，不入库不入 git。
 - 用户指令：**先把代码全部写完再联调**；所有依赖真实 DB/真实模型的测试标记 `@pytest.mark.integration`/`live`，默认跳过；离线测试（unit/contract，FakeLLM）必须通过。
-- 实现代码放 `/Users/liyifan/Documents/Codex/2026-09-19-agent/semiconductor-intel/`，git 仓库，每任务一提交。
+- 实现代码放 `<repo>/`，git 仓库，每任务一提交。
 - 检索选型已锁定（设计 D13/D14）：pg_textsearch+pg_jieba（BM25）、pgvector+pgvectorscale（diskann，exact 为默认基线）。
 - 中间件三层（设计 D16）与模型路由三档（D17）按 docs/06 v1.3 与 docs/14 §3.1 实现。
 - 优先试运行领域：Etching 三主题（RF/射频、材料选择、OES 监控算法）（设计 D15）。
@@ -96,7 +96,7 @@ dependencies = [
 dev = ["pytest", "pytest-asyncio", "ruff", "mypy", "types-feedparser"]
 
 [tool.uv.sources]
-nooa = { path = "/Users/liyifan/Documents/labs-OO-Agents", editable = true }
+nooa = { path = "<local NOOA checkout>", editable = true }
 
 [tool.pytest.ini_options]
 markers = ["integration: needs real Postgres", "live: needs network/provider"]
@@ -185,11 +185,11 @@ addopts = "-m 'not integration and not live'"
 
 **Files:** Create `deploy/nas/Containerfile`、`deploy/nas/setup-nas.sh`、`deploy/nas/README.md`
 
-**Interfaces:** 在 `liyifan@192.168.1.21`（aarch64）执行：
+**Interfaces:** 在 `liyifan@your-nas-host`（aarch64）执行：
 
 ```bash
 # setup-nas.sh 概要（脚本内逐步 set -euo pipefail）
-ssh liyifan@192.168.1.21 mkdir -p ~/semiconductor-intel/{pgdata,objects,traces}
+ssh liyifan@your-nas-host mkdir -p ~/semiconductor-intel/{pgdata,objects,traces}
 # Containerfile: FROM docker.io/library/postgres:18
 #   apt-get install -y build-essential cmake git postgresql-server-dev-18(注:镜像内为 postgresql-dev-18)
 #   git clone pg_textsearch@v1.4.0 → make && make install（写入 shared_preload_libraries 模板）
@@ -211,7 +211,7 @@ podman run -d --name semiconductor-intel-pg --replace \
 ```
 
 - [ ] **Step 1** 写 Containerfile + 脚本（版本 pin：pg_textsearch v1.4.0、pg_jieba master commit、pgvector 0.8.x、pgvectorscale 0.9.x）。
-- [ ] **Step 2** 在 NAS 构建并起容器；`psql -h 192.168.1.21 -U postgres -c '\dx'` 四扩展在场；jieba 分词 smoke 出词、`<@>` 返回行。
+- [ ] **Step 2** 在 NAS 构建并起容器；`psql -h your-nas-host -U postgres -c '\dx'` 四扩展在场；jieba 分词 smoke 出词、`<@>` 返回行。
 - [ ] **Step 3** 提交 `feat: nas postgres container`。**注意：用户要求先写完代码——本任务排在代码任务之后执行亦可，脚本先就位。**
 
 ### Task 10: 检索层（chunker/BM25/向量/召回）
@@ -301,14 +301,14 @@ tracing.py：job 进程入口 `enable_tracing(jsonl(per-job dir))` + `session_sc
 
 **Files:** Create `deploy/compose.yaml`、`deploy/Dockerfile.api`、`.env.example` 补全、`README.md` 运行手册（本地 dev、NAS DB、grok2api route、seed 导入、试运行步骤）
 
-**Interfaces:** compose：reverse-proxy/api/scheduler/pipeline-worker/fetch-worker/research-runner/postgres（复用 NAS 或本地）；`INTEL_DATABASE_URL=postgresql+asyncpg://intel:${PG_PASSWORD}@192.168.1.21:5432/intel`；grok2api route 样例：
+**Interfaces:** compose：reverse-proxy/api/scheduler/pipeline-worker/fetch-worker/research-runner/postgres（复用 NAS 或本地）；`INTEL_DATABASE_URL=postgresql+asyncpg://intel:${PG_PASSWORD}@your-nas-host:5432/intel`；grok2api route 样例：
 
 ```yaml
 # registry/routes.yaml（经 unifiedllm registry 加载）
 routes:
-  L1: { provider: openai_compatible, model: "grok-3-mini", base_url: "http://192.168.1.21:8000/v1", api_key_env: GROK2API_KEY, reasoning: none }
-  L2: { provider: openai_compatible, model: "grok-3",      base_url: "http://192.168.1.21:8000/v1", api_key_env: GROK2API_KEY }
-  L3: { provider: openai_compatible, model: "grok-4",      base_url: "http://192.168.1.21:8000/v1", api_key_env: GROK2API_KEY, reasoning: high }
+  L1: { provider: openai_compatible, model: "grok-3-mini", base_url: "http://your-nas-host:8000/v1", api_key_env: GROK2API_KEY, reasoning: none }
+  L2: { provider: openai_compatible, model: "grok-3",      base_url: "http://your-nas-host:8000/v1", api_key_env: GROK2API_KEY }
+  L3: { provider: openai_compatible, model: "grok-4",      base_url: "http://your-nas-host:8000/v1", api_key_env: GROK2API_KEY, reasoning: high }
 ```
 
 （真实可用模型名以 grok2api `/v1/models` 实测为准，联调时修正。）

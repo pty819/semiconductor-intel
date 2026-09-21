@@ -7,8 +7,8 @@ targets:
 
 | Host | Notes |
 |---|---|
-| NAS `liyifan@192.168.1.21` | Armbian 26.8.3 aarch64, podman 5.7.0, 7.7 GB RAM. Host port 5432 is taken by a host-level service → publish 5433. Build is slow (Rust on weak ARM). |
-| x86 `192.168.1.82` | Faster builds; use the default 5432 unless something listens. |
+| NAS `liyifan@your-nas-host` | Armbian 26.8.3 aarch64, podman 5.7.0, 7.7 GB RAM. Host port 5432 is taken by a host-level service → publish 5433. Build is slow (Rust on weak ARM). |
+| x86 `your-database-host` | Faster builds; use the default 5432 unless something listens. |
 
 It carries the four retrieval extensions selected in design D13/D14:
 BM25 full-text search over jieba-segmented Chinese (pg_textsearch +
@@ -34,7 +34,7 @@ Run with (see `usage` inside for all knobs):
 # NAS (aarch64), host port 5433:
 HOST_PORT=5433 PG_PASSWORD=... ./deploy/postgres/setup.sh
 # x86 server:
-HOST=liyifan@192.168.1.82 PG_PASSWORD=... ./deploy/postgres/setup.sh
+HOST=liyifan@your-database-host PG_PASSWORD=... ./deploy/postgres/setup.sh
 ```
 
 ## Verified extension versions, licenses, sources
@@ -100,12 +100,12 @@ Two facts that differ from the original task sketch, both verified:
 `open-webui`, `grok2api` (`0.0.0.0:8000`) all predate this project.
 `setup-nas.sh` creates exactly one new container and touches none of these.
 The app's model traffic goes through the existing grok2api at
-`http://192.168.1.21:8000` — unrelated to this database container.
+`http://your-nas-host:8000` — unrelated to this database container.
 
 ## How the app connects
 
 ```bash
-export INTEL_DATABASE_URL='postgresql+asyncpg://postgres:<PG_PASSWORD>@192.168.1.21:5432/postgres'
+export INTEL_DATABASE_URL='postgresql+asyncpg://postgres:<PG_PASSWORD>@your-nas-host:5432/postgres'
 ```
 
 Note for 联调: Postgres extensions are **per-database**. The init script runs
@@ -114,7 +114,7 @@ later migrates to a dedicated `intel` database, re-run the same DDL there,
 e.g.:
 
 ```bash
-ssh liyifan@192.168.1.21 'podman exec -i semiconductor-intel-pg psql -U postgres -d intel' \
+ssh liyifan@your-nas-host 'podman exec -i semiconductor-intel-pg psql -U postgres -d intel' \
     < <(sed -n "/<<'EOSQL'/,/^EOSQL/p" deploy/nas/init/40-intel-extensions.sh | sed '1d;$d')
 ```
 
@@ -124,7 +124,7 @@ Data lives in the bind mount `~/semiconductor-intel/pgdata` plus
 `~/semiconductor-intel/objects`. Logical backups:
 
 ```bash
-ssh liyifan@192.168.1.21 'podman exec -t semiconductor-intel-pg pg_dumpall -U postgres' \
+ssh liyifan@your-nas-host 'podman exec -t semiconductor-intel-pg pg_dumpall -U postgres' \
     > ~/backups/semiconductor-intel-$(date +%F).sql
 ```
 
@@ -134,7 +134,7 @@ schema recreates the DDL — the extensions themselves come from the image.)
 ## Rollback
 
 ```bash
-ssh liyifan@192.168.1.21 'podman rm -f semiconductor-intel-pg'        # container only
-ssh liyifan@192.168.1.21 'rm -rf ~/semiconductor-intel/pgdata/*'      # + destroy data
-ssh liyifan@192.168.1.21 'podman rmi semiconductor-intel-pg:18'       # + image
+ssh liyifan@your-nas-host 'podman rm -f semiconductor-intel-pg'        # container only
+ssh liyifan@your-nas-host 'rm -rf ~/semiconductor-intel/pgdata/*'      # + destroy data
+ssh liyifan@your-nas-host 'podman rmi semiconductor-intel-pg:18'       # + image
 ```

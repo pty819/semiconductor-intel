@@ -41,7 +41,7 @@ class PageParams:
 
 
 class Page[T](BaseModel):
-    """List response envelope: {items, next_cursor} (openapi *Page)."""
+    """List response envelope: ``{items, next_cursor}`` (openapi Page)."""
 
     items: list[T]
     next_cursor: str | None = None

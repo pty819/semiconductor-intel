@@ -329,7 +329,7 @@ class TestSettings:
         assert s.database_url == "postgresql+asyncpg://intel:intel@localhost:5432/intel"
         assert s.object_store_root == Path("var/objects")
         assert s.session_pepper  # non-empty dev default
-        assert s.llm_base_url == "http://192.168.1.82:8080/v1"
+        assert s.llm_base_url == "http://localhost:8080/v1"
         assert s.llm_api_key == ""
         assert s.llm_concurrency == 4
         assert s.fetch_concurrency == 8

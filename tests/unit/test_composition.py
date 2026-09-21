@@ -84,7 +84,7 @@ def test_nooa_is_a_git_pin_with_no_local_paths() -> None:
         ("compose", compose),
         ("uv.lock", lock),
     ):
-        assert "/Users/liyifan" not in text, f"local path leaked into {name}"
+        assert "/Users/" not in text, f"local path leaked into {name}"
 
 
 class _Begin:

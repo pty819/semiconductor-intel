@@ -1,6 +1,7 @@
 """Absolute time-bound semantics for TimeValue (spec 03 §5).
 
 Rules implemented here:
+
 - Intervals are uniformly half-open ``[start, end)``.
 - A day is local midnight to the next local midnight; a TimeValue stores the
   bounds as aware datetimes, and this module is the single place that turns

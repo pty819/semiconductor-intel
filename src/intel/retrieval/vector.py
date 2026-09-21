@@ -131,7 +131,7 @@ DISKANN_RECALL_GATE = 0.98
 def recall_at_k(
     exact: Sequence[Any], approximate: Sequence[Any], *, k: int = 100
 ) -> float:
-    """|top-k(approx) ∩ top-k(exact)| / |top-k(exact)| — REC-08 harness.
+    """Recall = size(approx ∩ exact) / size(exact), both top-k sets (REC-08 harness).
 
     Both arguments are result orderings (best first; ids or rows — anything
     hashable). An empty exact top-k trivially recalls fully (nothing was

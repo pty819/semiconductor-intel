@@ -1,8 +1,10 @@
 # semiconductor-intel
 
+[![Docs](https://github.com/pty819/semiconductor-intel/actions/workflows/docs.yml/badge.svg)](https://pty819.github.io/semiconductor-intel/)
+
 Semiconductor industry intelligence system built on the [NOOA agent framework](https://github.com/NVIDIA-NeMo/labs-OO-Agents): it ingests news, filings, PDFs and other sources about the semiconductor industry, runs NOOA-driven extraction and knowledge pipelines whose proposals are committed only after Python-side validation, and serves the results over a FastAPI API backed by PostgreSQL (full-text + vector search). The `intel` package lives in `src/intel/`; NOOA is a git dependency pinned to commit `d4d46f7` (see `[tool.uv.sources]` in pyproject.toml).
 
-Full design specification (16 docs + contracts): `/Users/liyifan/Documents/Codex/2026-09-19-agent/semiconductor-intel-design/`
+Full design specification (16 docs + contracts): `<local design-pack checkout>/`
 
 Frontend is Vue 3 (`web/`). Compose serves the production build behind nginx; local UI work uses `pnpm dev`.
 
@@ -20,9 +22,9 @@ Copy `.env.example` to `.env` and fill in secrets.
 
 | Role | Where |
 |---|---|
-| Postgres | **192.168.1.82:5432** — container `semiconductor-intel-pg`, user `postgres`, database `postgres`. URL: `postgresql+asyncpg://postgres:${PG_PASSWORD}@192.168.1.82:5432/postgres` |
-| LLM | OpenAI-v1. Debug: 82 llamacpp `http://192.168.1.82:8080/v1` (model id from `GET /v1/models`, e.g. Bonsai-27B GGUF). A grok2api gateway is also OpenAI-v1 if you point `INTEL_LLM_BASE_URL` at it — **do not** put `grok-*` names in committed yaml. |
-| NAS 21 | Optional only. `HOST=liyifan@192.168.1.21 HOST_PORT=5433 ./deploy/postgres/setup.sh` — not required for runtime. |
+| Postgres | **your-database-host:5432** — container `semiconductor-intel-pg`, user `postgres`, database `postgres`. URL: `postgresql+asyncpg://postgres:${PG_PASSWORD}@your-database-host:5432/postgres` |
+| LLM | OpenAI-v1. Debug: 82 llamacpp `http://localhost:8080/v1` (model id from `GET /v1/models`, e.g. Bonsai-27B GGUF). A grok2api gateway is also OpenAI-v1 if you point `INTEL_LLM_BASE_URL` at it — **do not** put `grok-*` names in committed yaml. |
+| NAS 21 | Optional only. `HOST=user@your-nas-host HOST_PORT=5433 ./deploy/postgres/setup.sh` — not required for runtime. |
 
 Placeholder model ids in `src/intel/nooa_adapter/registry/routes.yaml` (`openai/model-l1` / `l2` / `l3`) must be replaced with the ids `GET /v1/models` actually returns before a live smoke run.
 
