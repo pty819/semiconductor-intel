@@ -42,11 +42,12 @@ from intel.services import errors as service_errors
 from intel.services.errors import ServiceError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# The design pack's contract snapshots (openapi.json / schemas.json) are
+# vendored under tests/contract/design_pack so the suite is self-contained.
+# Point INTEL_DESIGN_PACK at a live checkout to compare against a newer
+# design instead of the vendored v1.3 snapshot.
 DESIGN_PACK = Path(
-    os.environ.get(
-        "INTEL_DESIGN_PACK",
-        REPO_ROOT.parent / "semiconductor-intel-design",
-    )
+    os.environ.get("INTEL_DESIGN_PACK", REPO_ROOT / "tests" / "contract" / "design_pack")
 )
 OPENAPI_PATH = DESIGN_PACK / "contracts" / "openapi.json"
 SCHEMAS_PATH = DESIGN_PACK / "contracts" / "schemas.json"

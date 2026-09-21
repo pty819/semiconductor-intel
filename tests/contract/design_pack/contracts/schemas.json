@@ -1,0 +1,4700 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Ack": {
+      "additionalProperties": false,
+      "properties": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "Ack",
+      "type": "object"
+    },
+    "GenerationRef": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "output_path": {
+          "pattern": "^(|/.*)$",
+          "title": "Output Path",
+          "type": "string"
+        },
+        "role": {
+          "default": "producer",
+          "enum": [
+            "producer",
+            "verifier",
+            "upstream"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "output_path"
+      ],
+      "title": "GenerationRef",
+      "type": "object"
+    },
+    "AnswerBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "fact",
+            "inference",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "citation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Citation Ids",
+          "type": "array"
+        },
+        "generation_refs": {
+          "items": {
+            "$ref": "#/$defs/GenerationRef"
+          },
+          "title": "Generation Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text",
+        "kind"
+      ],
+      "title": "AnswerBlock",
+      "type": "object"
+    },
+    "AssessmentDimensions": {
+      "additionalProperties": false,
+      "description": "Discrete quality vocabulary shared by claims, events and answers.\n\nUncalibrated probabilities are not representable in this structure.",
+      "properties": {
+        "extraction_quality": {
+          "default": "unknown",
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "unknown"
+          ],
+          "title": "Extraction Quality",
+          "type": "string"
+        },
+        "source_reliability": {
+          "default": "unknown",
+          "enum": [
+            "primary_official",
+            "independent_media",
+            "aggregator",
+            "unknown"
+          ],
+          "title": "Source Reliability",
+          "type": "string"
+        },
+        "independence": {
+          "default": "unknown",
+          "enum": [
+            "independent",
+            "shared_source",
+            "unknown"
+          ],
+          "title": "Independence",
+          "type": "string"
+        },
+        "evidence_sufficiency": {
+          "default": "unknown",
+          "enum": [
+            "sufficient",
+            "partial",
+            "insufficient",
+            "unknown"
+          ],
+          "title": "Evidence Sufficiency",
+          "type": "string"
+        },
+        "conflict_state": {
+          "default": "unknown",
+          "enum": [
+            "none_known",
+            "disputed",
+            "corrected",
+            "retracted",
+            "unknown"
+          ],
+          "title": "Conflict State",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "title": "AssessmentDimensions",
+      "type": "object"
+    },
+    "BusinessProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "products": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Products",
+          "type": "array"
+        },
+        "target_customers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Target Customers",
+          "type": "array"
+        },
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "research_goals": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Research Goals",
+          "type": "array"
+        },
+        "important_changes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Important Changes",
+          "type": "array"
+        }
+      },
+      "title": "BusinessProfile",
+      "type": "object"
+    },
+    "Citation": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "claim_revision_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claim Revision Id"
+        },
+        "evidence_id": {
+          "format": "uuid",
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "parse_id": {
+          "format": "uuid",
+          "title": "Parse Id",
+          "type": "string"
+        },
+        "document_id": {
+          "format": "uuid",
+          "title": "Document Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "evidence_id",
+        "parse_id",
+        "document_id"
+      ],
+      "title": "Citation",
+      "type": "object"
+    },
+    "ClaimErrorCorrection": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "claim_error",
+          "default": "claim_error",
+          "title": "Kind",
+          "type": "string"
+        },
+        "claim_revision_id": {
+          "format": "uuid",
+          "title": "Claim Revision Id",
+          "type": "string"
+        },
+        "corrected_text": {
+          "title": "Corrected Text",
+          "type": "string"
+        },
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "claim_revision_id",
+        "corrected_text"
+      ],
+      "title": "ClaimErrorCorrection",
+      "type": "object"
+    },
+    "EvidenceProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "block_id": {
+          "title": "Block Id",
+          "type": "string"
+        },
+        "exact_quote": {
+          "minLength": 1,
+          "title": "Exact Quote",
+          "type": "string"
+        },
+        "relation": {
+          "enum": [
+            "supports",
+            "refutes",
+            "context"
+          ],
+          "title": "Relation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "block_id",
+        "exact_quote",
+        "relation"
+      ],
+      "title": "EvidenceProposal",
+      "type": "object"
+    },
+    "ClaimProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "source_statement",
+            "inference"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "attribution": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attribution"
+        },
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceProposal"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text",
+        "kind",
+        "evidence"
+      ],
+      "title": "ClaimProposal",
+      "type": "object"
+    },
+    "ConversationConstraint": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "scope",
+            "time",
+            "entity",
+            "preference",
+            "comparison",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "source_message_id": {
+          "format": "uuid",
+          "title": "Source Message Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "superseded"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "kind",
+        "source_message_id",
+        "status"
+      ],
+      "title": "ConversationConstraint",
+      "type": "object"
+    },
+    "Coverage": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "partial",
+            "pending",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        },
+        "processed": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Processed",
+          "type": "integer"
+        },
+        "failed": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "gaps": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Gaps",
+          "type": "array"
+        },
+        "watermark": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Watermark"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "Coverage",
+      "type": "object"
+    },
+    "MessageView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "parent_message_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Message Id"
+        },
+        "turn_index": {
+          "minimum": 1,
+          "title": "Turn Index",
+          "type": "integer"
+        },
+        "role": {
+          "enum": [
+            "user",
+            "assistant"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "ready",
+            "partial",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/AnswerBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "coverage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Coverage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "job_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Job Id"
+        }
+      },
+      "required": [
+        "id",
+        "turn_index",
+        "role",
+        "status",
+        "blocks",
+        "citations"
+      ],
+      "title": "MessageView",
+      "type": "object"
+    },
+    "ConversationContext": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "format": "uuid",
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "state_version": {
+          "minimum": 1,
+          "title": "State Version",
+          "type": "integer"
+        },
+        "resolved_question": {
+          "title": "Resolved Question",
+          "type": "string"
+        },
+        "recent_messages": {
+          "items": {
+            "$ref": "#/$defs/MessageView"
+          },
+          "title": "Recent Messages",
+          "type": "array"
+        },
+        "constraints": {
+          "items": {
+            "$ref": "#/$defs/ConversationConstraint"
+          },
+          "title": "Constraints",
+          "type": "array"
+        },
+        "ordered_references": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Ordered References",
+          "type": "array"
+        },
+        "open_questions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Open Questions",
+          "type": "array"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        },
+        "summary_through_message_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary Through Message Id"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "state_version",
+        "resolved_question",
+        "recent_messages",
+        "constraints",
+        "ordered_references",
+        "open_questions"
+      ],
+      "title": "ConversationContext",
+      "type": "object"
+    },
+    "ConversationCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "default": "新对话",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "title": "ConversationCreate",
+      "type": "object"
+    },
+    "ConversationView": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "default": "新对话",
+          "title": "Title",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "industry_id": {
+          "format": "uuid",
+          "title": "Industry Id",
+          "type": "string"
+        },
+        "state_version": {
+          "minimum": 1,
+          "title": "State Version",
+          "type": "integer"
+        },
+        "last_committed_message_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Committed Message Id"
+        }
+      },
+      "required": [
+        "id",
+        "industry_id",
+        "state_version"
+      ],
+      "title": "ConversationView",
+      "type": "object"
+    },
+    "DuplicateMergeCorrection": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "duplicate",
+          "default": "duplicate",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source_event_id": {
+          "format": "uuid",
+          "title": "Source Event Id",
+          "type": "string"
+        },
+        "target_event_id": {
+          "format": "uuid",
+          "title": "Target Event Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_event_id",
+        "target_event_id"
+      ],
+      "title": "DuplicateMergeCorrection",
+      "type": "object"
+    },
+    "EventTimeCorrection": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "event_time",
+          "default": "event_time",
+          "title": "Kind",
+          "type": "string"
+        },
+        "event_revision_id": {
+          "format": "uuid",
+          "title": "Event Revision Id",
+          "type": "string"
+        },
+        "occurred_time": {
+          "$ref": "#/$defs/TimeValue"
+        },
+        "published_time": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "event_revision_id",
+        "occurred_time"
+      ],
+      "title": "EventTimeCorrection",
+      "type": "object"
+    },
+    "RelationErrorCorrection": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "relation_error",
+          "default": "relation_error",
+          "title": "Kind",
+          "type": "string"
+        },
+        "relation_id": {
+          "format": "uuid",
+          "title": "Relation Id",
+          "type": "string"
+        },
+        "status": {
+          "default": "retracted",
+          "enum": [
+            "retracted",
+            "revised"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "relation_id"
+      ],
+      "title": "RelationErrorCorrection",
+      "type": "object"
+    },
+    "TimeValue": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End"
+        },
+        "precision": {
+          "enum": [
+            "instant",
+            "day",
+            "month",
+            "year",
+            "range",
+            "unknown"
+          ],
+          "title": "Precision",
+          "type": "string"
+        },
+        "timezone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timezone"
+        },
+        "original_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Text"
+        },
+        "basis": {
+          "default": "explicit",
+          "enum": [
+            "explicit",
+            "inferred",
+            "unknown"
+          ],
+          "title": "Basis",
+          "type": "string"
+        }
+      },
+      "required": [
+        "precision"
+      ],
+      "title": "TimeValue",
+      "type": "object"
+    },
+    "TopicAssociationCorrection": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "topic_association",
+          "default": "topic_association",
+          "title": "Kind",
+          "type": "string"
+        },
+        "industry_document_id": {
+          "format": "uuid",
+          "title": "Industry Document Id",
+          "type": "string"
+        },
+        "topic_id": {
+          "format": "uuid",
+          "title": "Topic Id",
+          "type": "string"
+        },
+        "relevance": {
+          "enum": [
+            "direct",
+            "background",
+            "uncertain",
+            "unrelated"
+          ],
+          "title": "Relevance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "industry_document_id",
+        "topic_id",
+        "relevance"
+      ],
+      "title": "TopicAssociationCorrection",
+      "type": "object"
+    },
+    "CorrectionCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "correction": {
+          "discriminator": {
+            "mapping": {
+              "claim_error": "#/$defs/ClaimErrorCorrection",
+              "duplicate": "#/$defs/DuplicateMergeCorrection",
+              "event_time": "#/$defs/EventTimeCorrection",
+              "relation_error": "#/$defs/RelationErrorCorrection",
+              "topic_association": "#/$defs/TopicAssociationCorrection"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ClaimErrorCorrection"
+            },
+            {
+              "$ref": "#/$defs/EventTimeCorrection"
+            },
+            {
+              "$ref": "#/$defs/DuplicateMergeCorrection"
+            },
+            {
+              "$ref": "#/$defs/TopicAssociationCorrection"
+            },
+            {
+              "$ref": "#/$defs/RelationErrorCorrection"
+            }
+          ],
+          "title": "Correction"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "related_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Related Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "expected_version",
+        "correction",
+        "rationale"
+      ],
+      "title": "CorrectionCommand",
+      "type": "object"
+    },
+    "DiffView": {
+      "additionalProperties": false,
+      "properties": {
+        "from_parse_id": {
+          "format": "uuid",
+          "title": "From Parse Id",
+          "type": "string"
+        },
+        "to_parse_id": {
+          "format": "uuid",
+          "title": "To Parse Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "content_change",
+            "parser_change",
+            "mixed"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "algorithm_version": {
+          "title": "Algorithm Version",
+          "type": "string"
+        },
+        "changed_blocks": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Changed Blocks",
+          "type": "array"
+        },
+        "field_changes": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Field Changes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "from_parse_id",
+        "to_parse_id",
+        "kind",
+        "algorithm_version",
+        "changed_blocks",
+        "field_changes"
+      ],
+      "title": "DiffView",
+      "type": "object"
+    },
+    "DocumentRevisionView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "document_id": {
+          "format": "uuid",
+          "title": "Document Id",
+          "type": "string"
+        },
+        "capture_id": {
+          "format": "uuid",
+          "title": "Capture Id",
+          "type": "string"
+        },
+        "parser_version_id": {
+          "format": "uuid",
+          "title": "Parser Version Id",
+          "type": "string"
+        },
+        "parsed_at": {
+          "format": "date-time",
+          "title": "Parsed At",
+          "type": "string"
+        },
+        "coverage": {
+          "$ref": "#/$defs/Coverage"
+        }
+      },
+      "required": [
+        "id",
+        "document_id",
+        "capture_id",
+        "parser_version_id",
+        "parsed_at",
+        "coverage"
+      ],
+      "title": "DocumentRevisionView",
+      "type": "object"
+    },
+    "DocumentTopicCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "topic_id": {
+          "format": "uuid",
+          "title": "Topic Id",
+          "type": "string"
+        },
+        "relevance": {
+          "enum": [
+            "direct",
+            "background",
+            "uncertain",
+            "unrelated"
+          ],
+          "title": "Relevance",
+          "type": "string"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "lock": {
+          "default": true,
+          "title": "Lock",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "expected_version",
+        "topic_id",
+        "relevance",
+        "rationale"
+      ],
+      "title": "DocumentTopicCommand",
+      "type": "object"
+    },
+    "DocumentView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "industry_id": {
+          "format": "uuid",
+          "title": "Industry Id",
+          "type": "string"
+        },
+        "row_version": {
+          "title": "Row Version",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        },
+        "current_parse_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Parse Id"
+        },
+        "retrieval_scope": {
+          "enum": [
+            "metadata",
+            "abstract",
+            "partial",
+            "fulltext"
+          ],
+          "title": "Retrieval Scope",
+          "type": "string"
+        },
+        "parse_status": {
+          "enum": [
+            "ok",
+            "partial",
+            "failed",
+            "pending"
+          ],
+          "title": "Parse Status",
+          "type": "string"
+        },
+        "relevance": {
+          "enum": [
+            "direct",
+            "background",
+            "uncertain"
+          ],
+          "title": "Relevance",
+          "type": "string"
+        },
+        "quality_flags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Quality Flags",
+          "type": "array"
+        },
+        "first_seen_at": {
+          "format": "date-time",
+          "title": "First Seen At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "industry_id",
+        "row_version",
+        "title",
+        "source_url",
+        "retrieval_scope",
+        "parse_status",
+        "relevance",
+        "quality_flags",
+        "first_seen_at"
+      ],
+      "title": "DocumentView",
+      "type": "object"
+    },
+    "EntityCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "company",
+            "product",
+            "person",
+            "institution",
+            "method",
+            "dataset",
+            "component"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "identifiers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Identifiers",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "title": "EntityCreate",
+      "type": "object"
+    },
+    "EntityPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "aliases": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aliases"
+        },
+        "identifiers": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identifiers"
+        }
+      },
+      "required": [
+        "expected_version"
+      ],
+      "title": "EntityPatch",
+      "type": "object"
+    },
+    "EntityView": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "company",
+            "product",
+            "person",
+            "institution",
+            "method",
+            "dataset",
+            "component"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "identifiers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Identifiers",
+          "type": "object"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "row_version": {
+          "title": "Row Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "id",
+        "row_version"
+      ],
+      "title": "EntityView",
+      "type": "object"
+    },
+    "ErrorDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "details": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Details"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "request_id"
+      ],
+      "title": "ErrorDetail",
+      "type": "object"
+    },
+    "ErrorEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/ErrorDetail"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "title": "ErrorEnvelope",
+      "type": "object"
+    },
+    "TopicInterpretation": {
+      "additionalProperties": false,
+      "properties": {
+        "topic_id": {
+          "format": "uuid",
+          "title": "Topic Id",
+          "type": "string"
+        },
+        "topic_revision_id": {
+          "format": "uuid",
+          "title": "Topic Revision Id",
+          "type": "string"
+        },
+        "relevance": {
+          "enum": [
+            "direct",
+            "background",
+            "uncertain"
+          ],
+          "title": "Relevance",
+          "type": "string"
+        },
+        "importance": {
+          "enum": [
+            "high",
+            "normal",
+            "low"
+          ],
+          "title": "Importance",
+          "type": "string"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "interpretation": {
+          "title": "Interpretation",
+          "type": "string"
+        },
+        "citation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Citation Ids",
+          "type": "array"
+        },
+        "generation_refs": {
+          "items": {
+            "$ref": "#/$defs/GenerationRef"
+          },
+          "title": "Generation Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "topic_id",
+        "topic_revision_id",
+        "relevance",
+        "importance",
+        "rationale",
+        "interpretation",
+        "citation_ids"
+      ],
+      "title": "TopicInterpretation",
+      "type": "object"
+    },
+    "EventCard": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "revision_id": {
+          "format": "uuid",
+          "title": "Revision Id",
+          "type": "string"
+        },
+        "row_version": {
+          "title": "Row Version",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "event_type": {
+          "title": "Event Type",
+          "type": "string"
+        },
+        "occurred_time": {
+          "$ref": "#/$defs/TimeValue"
+        },
+        "published_time": {
+          "$ref": "#/$defs/TimeValue"
+        },
+        "effective_time": {
+          "$ref": "#/$defs/TimeValue"
+        },
+        "first_discovered_at": {
+          "format": "date-time",
+          "title": "First Discovered At",
+          "type": "string"
+        },
+        "interpretations": {
+          "items": {
+            "$ref": "#/$defs/TopicInterpretation"
+          },
+          "title": "Interpretations",
+          "type": "array"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "document_count": {
+          "minimum": 0,
+          "title": "Document Count",
+          "type": "integer"
+        },
+        "source_family_count_known": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Family Count Known"
+        },
+        "conflict_state": {
+          "enum": [
+            "none_known",
+            "disputed",
+            "unknown"
+          ],
+          "title": "Conflict State",
+          "type": "string"
+        },
+        "late_discovery": {
+          "default": false,
+          "title": "Late Discovery",
+          "type": "boolean"
+        },
+        "lifecycle": {
+          "default": "active",
+          "enum": [
+            "active",
+            "merged",
+            "retracted"
+          ],
+          "title": "Lifecycle",
+          "type": "string"
+        },
+        "merged_into_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Merged Into Id"
+        },
+        "generation_refs": {
+          "items": {
+            "$ref": "#/$defs/GenerationRef"
+          },
+          "title": "Generation Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "revision_id",
+        "row_version",
+        "title",
+        "summary",
+        "event_type",
+        "occurred_time",
+        "published_time",
+        "effective_time",
+        "first_discovered_at",
+        "interpretations",
+        "citations",
+        "document_count",
+        "conflict_state"
+      ],
+      "title": "EventCard",
+      "type": "object"
+    },
+    "EvidenceView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "claim_revision_id": {
+          "format": "uuid",
+          "title": "Claim Revision Id",
+          "type": "string"
+        },
+        "parse_id": {
+          "format": "uuid",
+          "title": "Parse Id",
+          "type": "string"
+        },
+        "document_id": {
+          "format": "uuid",
+          "title": "Document Id",
+          "type": "string"
+        },
+        "block_id": {
+          "title": "Block Id",
+          "type": "string"
+        },
+        "start_char": {
+          "minimum": 0,
+          "title": "Start Char",
+          "type": "integer"
+        },
+        "end_char": {
+          "minimum": 1,
+          "title": "End Char",
+          "type": "integer"
+        },
+        "exact_quote": {
+          "title": "Exact Quote",
+          "type": "string"
+        },
+        "context_before": {
+          "title": "Context Before",
+          "type": "string"
+        },
+        "context_after": {
+          "title": "Context After",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "locator_status": {
+          "enum": [
+            "verified",
+            "invalid"
+          ],
+          "title": "Locator Status",
+          "type": "string"
+        },
+        "semantic_support": {
+          "enum": [
+            "supported",
+            "uncertain",
+            "rejected"
+          ],
+          "title": "Semantic Support",
+          "type": "string"
+        },
+        "retrieval_scope": {
+          "enum": [
+            "metadata",
+            "abstract",
+            "partial",
+            "fulltext"
+          ],
+          "title": "Retrieval Scope",
+          "type": "string"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        },
+        "artifact_url": {
+          "title": "Artifact Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "claim_revision_id",
+        "parse_id",
+        "document_id",
+        "block_id",
+        "start_char",
+        "end_char",
+        "exact_quote",
+        "context_before",
+        "context_after",
+        "locator_status",
+        "semantic_support",
+        "retrieval_scope",
+        "source_url",
+        "artifact_url"
+      ],
+      "title": "EvidenceView",
+      "type": "object"
+    },
+    "EvolutionEdge": {
+      "additionalProperties": false,
+      "properties": {
+        "from_event_id": {
+          "format": "uuid",
+          "title": "From Event Id",
+          "type": "string"
+        },
+        "to_event_id": {
+          "format": "uuid",
+          "title": "To Event Id",
+          "type": "string"
+        },
+        "relation": {
+          "enum": [
+            "updates",
+            "validates",
+            "refutes",
+            "applies",
+            "extends",
+            "parallel",
+            "replaces"
+          ],
+          "title": "Relation",
+          "type": "string"
+        },
+        "basis": {
+          "enum": [
+            "explicit",
+            "inferred"
+          ],
+          "title": "Basis",
+          "type": "string"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "citation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Citation Ids",
+          "type": "array"
+        },
+        "generation_refs": {
+          "items": {
+            "$ref": "#/$defs/GenerationRef"
+          },
+          "title": "Generation Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "from_event_id",
+        "to_event_id",
+        "relation",
+        "basis",
+        "rationale",
+        "citation_ids"
+      ],
+      "title": "EvolutionEdge",
+      "type": "object"
+    },
+    "EvolutionNode": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_revision_id": {
+          "format": "uuid",
+          "title": "Event Revision Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "citation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Citation Ids",
+          "type": "array"
+        },
+        "generation_refs": {
+          "items": {
+            "$ref": "#/$defs/GenerationRef"
+          },
+          "title": "Generation Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_revision_id",
+        "title",
+        "citation_ids"
+      ],
+      "title": "EvolutionNode",
+      "type": "object"
+    },
+    "EvolutionStage": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "event_revision_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Event Revision Ids",
+          "type": "array"
+        },
+        "citation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Citation Ids",
+          "type": "array"
+        },
+        "generation_refs": {
+          "items": {
+            "$ref": "#/$defs/GenerationRef"
+          },
+          "title": "Generation Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "event_revision_ids",
+        "citation_ids"
+      ],
+      "title": "EvolutionStage",
+      "type": "object"
+    },
+    "EvolutionView": {
+      "additionalProperties": false,
+      "properties": {
+        "revision_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision Id"
+        },
+        "topic_revision_id": {
+          "format": "uuid",
+          "title": "Topic Revision Id",
+          "type": "string"
+        },
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "insufficient_evidence",
+            "building",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "stale": {
+          "title": "Stale",
+          "type": "boolean"
+        },
+        "stages": {
+          "items": {
+            "$ref": "#/$defs/EvolutionStage"
+          },
+          "title": "Stages",
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/EvolutionNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/EvolutionEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "open_questions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Open Questions",
+          "type": "array"
+        },
+        "coverage": {
+          "$ref": "#/$defs/Coverage"
+        }
+      },
+      "required": [
+        "topic_revision_id",
+        "as_of",
+        "status",
+        "stale",
+        "stages",
+        "nodes",
+        "edges",
+        "citations",
+        "open_questions",
+        "coverage"
+      ],
+      "title": "EvolutionView",
+      "type": "object"
+    },
+    "SourceBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "block_id": {
+          "title": "Block Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "kind": {
+          "default": "paragraph",
+          "enum": [
+            "paragraph",
+            "heading",
+            "table",
+            "caption"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        }
+      },
+      "required": [
+        "block_id",
+        "text"
+      ],
+      "title": "SourceBlock",
+      "type": "object"
+    },
+    "ExtractionInput": {
+      "additionalProperties": false,
+      "properties": {
+        "parse_id": {
+          "format": "uuid",
+          "title": "Parse Id",
+          "type": "string"
+        },
+        "retrieval_scope": {
+          "enum": [
+            "metadata",
+            "abstract",
+            "partial",
+            "fulltext"
+          ],
+          "title": "Retrieval Scope",
+          "type": "string"
+        },
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/SourceBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "parse_id",
+        "retrieval_scope",
+        "blocks"
+      ],
+      "title": "ExtractionInput",
+      "type": "object"
+    },
+    "ExtractionProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/ClaimProposal"
+          },
+          "title": "Claims",
+          "type": "array"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "claims"
+      ],
+      "title": "ExtractionProposal",
+      "type": "object"
+    },
+    "FeedCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "template_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Template Id"
+        },
+        "seed_url": {
+          "title": "Seed Url",
+          "type": "string"
+        },
+        "adapter_type": {
+          "enum": [
+            "rss",
+            "atom",
+            "api",
+            "html_list",
+            "sitemap",
+            "page_monitor"
+          ],
+          "title": "Adapter Type",
+          "type": "string"
+        },
+        "interval_seconds": {
+          "default": 21600,
+          "minimum": 60,
+          "title": "Interval Seconds",
+          "type": "integer"
+        },
+        "user_enabled": {
+          "default": true,
+          "title": "User Enabled",
+          "type": "boolean"
+        },
+        "credential_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Credential Ref"
+        }
+      },
+      "required": [
+        "seed_url",
+        "adapter_type"
+      ],
+      "title": "FeedCreate",
+      "type": "object"
+    },
+    "FeedPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "minimum": 60,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "user_enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Enabled"
+        },
+        "parser_version_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parser Version Id"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "active",
+                "paused"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status"
+        }
+      },
+      "required": [
+        "expected_version"
+      ],
+      "title": "FeedPatch",
+      "type": "object"
+    },
+    "FeedView": {
+      "additionalProperties": false,
+      "properties": {
+        "template_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Template Id"
+        },
+        "seed_url": {
+          "title": "Seed Url",
+          "type": "string"
+        },
+        "adapter_type": {
+          "enum": [
+            "rss",
+            "atom",
+            "api",
+            "html_list",
+            "sitemap",
+            "page_monitor"
+          ],
+          "title": "Adapter Type",
+          "type": "string"
+        },
+        "interval_seconds": {
+          "default": 21600,
+          "minimum": 60,
+          "title": "Interval Seconds",
+          "type": "integer"
+        },
+        "user_enabled": {
+          "default": true,
+          "title": "User Enabled",
+          "type": "boolean"
+        },
+        "credential_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Credential Ref"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "row_version": {
+          "title": "Row Version",
+          "type": "integer"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "next_poll_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Poll At"
+        }
+      },
+      "required": [
+        "seed_url",
+        "adapter_type",
+        "id",
+        "row_version",
+        "status"
+      ],
+      "title": "FeedView",
+      "type": "object"
+    },
+    "GenerationRunView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "job_id": {
+          "format": "uuid",
+          "title": "Job Id",
+          "type": "string"
+        },
+        "attempt": {
+          "minimum": 1,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "step_key": {
+          "title": "Step Key",
+          "type": "string"
+        },
+        "trace_state": {
+          "enum": [
+            "recording",
+            "pending",
+            "available",
+            "missing",
+            "expired",
+            "redacted"
+          ],
+          "title": "Trace State",
+          "type": "string"
+        },
+        "model_route_display": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Route Display"
+        },
+        "nooa_commit": {
+          "title": "Nooa Commit",
+          "type": "string"
+        },
+        "prompt_version": {
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended At"
+        },
+        "summary": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Summary",
+          "type": "array"
+        },
+        "evidence_validation": {
+          "enum": [
+            "passed",
+            "partial",
+            "failed",
+            "not_applicable"
+          ],
+          "title": "Evidence Validation",
+          "type": "string"
+        },
+        "viewer_available": {
+          "title": "Viewer Available",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "job_id",
+        "attempt",
+        "step_key",
+        "trace_state",
+        "nooa_commit",
+        "prompt_version",
+        "started_at",
+        "summary",
+        "evidence_validation",
+        "viewer_available"
+      ],
+      "title": "GenerationRunView",
+      "type": "object"
+    },
+    "GenerationViewerLink": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        }
+      },
+      "required": [
+        "available"
+      ],
+      "title": "GenerationViewerLink",
+      "type": "object"
+    },
+    "HealthView": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "unavailable"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "HealthView",
+      "type": "object"
+    },
+    "ImportURL": {
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "ImportURL",
+      "type": "object"
+    },
+    "IndustrySettings": {
+      "additionalProperties": false,
+      "properties": {
+        "pool_scope": {
+          "default": "all_public",
+          "enum": [
+            "all_public",
+            "selected_feeds"
+          ],
+          "title": "Pool Scope",
+          "type": "string"
+        },
+        "backfill_days": {
+          "default": 90,
+          "maximum": 3650,
+          "minimum": 0,
+          "title": "Backfill Days",
+          "type": "integer"
+        },
+        "daily_report": {
+          "default": true,
+          "title": "Daily Report",
+          "type": "boolean"
+        }
+      },
+      "title": "IndustrySettings",
+      "type": "object"
+    },
+    "IndustryCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "included_scope": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Included Scope",
+          "type": "array"
+        },
+        "excluded_scope": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Scope",
+          "type": "array"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BusinessProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "settings": {
+          "$ref": "#/$defs/IndustrySettings"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "IndustryCreate",
+      "type": "object"
+    },
+    "IndustryPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "included_scope": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Included Scope"
+        },
+        "excluded_scope": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excluded Scope"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BusinessProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "settings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndustrySettings"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "expected_version"
+      ],
+      "title": "IndustryPatch",
+      "type": "object"
+    },
+    "IndustryView": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "included_scope": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Included Scope",
+          "type": "array"
+        },
+        "excluded_scope": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Scope",
+          "type": "array"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BusinessProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "settings": {
+          "$ref": "#/$defs/IndustrySettings"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "revision_id": {
+          "format": "uuid",
+          "title": "Revision Id",
+          "type": "string"
+        },
+        "row_version": {
+          "title": "Row Version",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "active",
+            "paused",
+            "archived"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "id",
+        "revision_id",
+        "row_version",
+        "status"
+      ],
+      "title": "IndustryView",
+      "type": "object"
+    },
+    "InputManifest": {
+      "additionalProperties": false,
+      "description": "Cross-object provenance for derived outputs. Schema-versioned.",
+      "properties": {
+        "schema_version": {
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "config_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Config Refs",
+          "type": "array"
+        },
+        "document_parse_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Document Parse Ids",
+          "type": "array"
+        },
+        "claim_revision_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Claim Revision Ids",
+          "type": "array"
+        },
+        "event_revision_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Event Revision Ids",
+          "type": "array"
+        },
+        "model_run_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Model Run Ids",
+          "type": "array"
+        }
+      },
+      "title": "InputManifest",
+      "type": "object"
+    },
+    "JobAccepted": {
+      "additionalProperties": false,
+      "properties": {
+        "job_id": {
+          "format": "uuid",
+          "title": "Job Id",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "events_url": {
+          "title": "Events Url",
+          "type": "string"
+        },
+        "result_url": {
+          "title": "Result Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "state",
+        "events_url",
+        "result_url"
+      ],
+      "title": "JobAccepted",
+      "type": "object"
+    },
+    "JobCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "default": "user_requested",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "title": "JobCommand",
+      "type": "object"
+    },
+    "JobView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "industry_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Industry Id"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "running",
+            "retry_wait",
+            "waiting_review",
+            "succeeded",
+            "partial",
+            "failed",
+            "cancelled"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "done": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Done",
+          "type": "integer"
+        },
+        "total": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "result_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result Url"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "state"
+      ],
+      "title": "JobView",
+      "type": "object"
+    },
+    "LifecycleCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "action": {
+          "enum": [
+            "activate",
+            "pause",
+            "archive",
+            "restore"
+          ],
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_version",
+        "action"
+      ],
+      "title": "LifecycleCommand",
+      "type": "object"
+    },
+    "LoginRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "login": {
+          "title": "Login",
+          "type": "string"
+        },
+        "password": {
+          "title": "Password",
+          "type": "string"
+        }
+      },
+      "required": [
+        "login",
+        "password"
+      ],
+      "title": "LoginRequest",
+      "type": "object"
+    },
+    "MessageCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "maxLength": 50000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "mode": {
+          "default": "archive",
+          "enum": [
+            "archive",
+            "online"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "topic_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Topic Ids",
+          "type": "array"
+        },
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "parent_message_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Message Id"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "MessageCreate",
+      "type": "object"
+    },
+    "PollRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "incremental",
+          "enum": [
+            "incremental",
+            "trial",
+            "backfill"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "from_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Time"
+        }
+      },
+      "title": "PollRequest",
+      "type": "object"
+    },
+    "ReadStateCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "title": "Read",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "read"
+      ],
+      "title": "ReadStateCommand",
+      "type": "object"
+    },
+    "ReportCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "from_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Time"
+        },
+        "to_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To Time"
+        },
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "type": {
+          "enum": [
+            "daily",
+            "topic",
+            "investigation"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "topic_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Topic Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "title"
+      ],
+      "title": "ReportCreate",
+      "type": "object"
+    },
+    "ReportView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "revision_id": {
+          "format": "uuid",
+          "title": "Revision Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/AnswerBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "coverage": {
+          "$ref": "#/$defs/Coverage"
+        },
+        "stale": {
+          "title": "Stale",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "revision_id",
+        "title",
+        "as_of",
+        "blocks",
+        "citations",
+        "coverage",
+        "stale"
+      ],
+      "title": "ReportView",
+      "type": "object"
+    },
+    "ReviewDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "action": {
+          "enum": [
+            "approve",
+            "reject",
+            "undo"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_version",
+        "action",
+        "reason"
+      ],
+      "title": "ReviewDecision",
+      "type": "object"
+    },
+    "ReviewView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "row_version": {
+          "title": "Row Version",
+          "type": "integer"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "accepted",
+            "rejected",
+            "obsolete",
+            "applied",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "proposal": {
+          "additionalProperties": true,
+          "title": "Proposal",
+          "type": "object"
+        },
+        "expected_versions": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Expected Versions",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "row_version",
+        "type",
+        "status",
+        "proposal",
+        "expected_versions"
+      ],
+      "title": "ReviewView",
+      "type": "object"
+    },
+    "SearchHit": {
+      "additionalProperties": false,
+      "properties": {
+        "object_id": {
+          "format": "uuid",
+          "title": "Object Id",
+          "type": "string"
+        },
+        "object_type": {
+          "enum": [
+            "document",
+            "claim",
+            "event"
+          ],
+          "title": "Object Type",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "excerpt": {
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "channels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Channels",
+          "type": "array"
+        },
+        "citation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Citation Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "object_id",
+        "object_type",
+        "title",
+        "excerpt",
+        "channels",
+        "citation_ids"
+      ],
+      "title": "SearchHit",
+      "type": "object"
+    },
+    "SearchRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "from_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Time"
+        },
+        "to_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To Time"
+        },
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "query": {
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "topic_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Topic Ids",
+          "type": "array"
+        },
+        "entity_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Entity Ids",
+          "type": "array"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cursor"
+        },
+        "page_size": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Page Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "SearchRequest",
+      "type": "object"
+    },
+    "SourceRunView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "feed_id": {
+          "format": "uuid",
+          "title": "Feed Id",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "no_change",
+            "partial",
+            "failed"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "coverage": {
+          "$ref": "#/$defs/Coverage"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finished At"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        }
+      },
+      "required": [
+        "id",
+        "feed_id",
+        "outcome",
+        "coverage",
+        "started_at"
+      ],
+      "title": "SourceRunView",
+      "type": "object"
+    },
+    "SourceSubscriptionCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "feed_id": {
+          "format": "uuid",
+          "title": "Feed Id",
+          "type": "string"
+        },
+        "backfill_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backfill From"
+        }
+      },
+      "required": [
+        "feed_id"
+      ],
+      "title": "SourceSubscriptionCreate",
+      "type": "object"
+    },
+    "SourceSubscriptionPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "paused"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_version",
+        "status"
+      ],
+      "title": "SourceSubscriptionPatch",
+      "type": "object"
+    },
+    "SourceSubscriptionView": {
+      "additionalProperties": false,
+      "properties": {
+        "feed_id": {
+          "format": "uuid",
+          "title": "Feed Id",
+          "type": "string"
+        },
+        "backfill_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backfill From"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "industry_id": {
+          "format": "uuid",
+          "title": "Industry Id",
+          "type": "string"
+        },
+        "row_version": {
+          "title": "Row Version",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "paused"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "feed_id",
+        "id",
+        "industry_id",
+        "row_version",
+        "status"
+      ],
+      "title": "SourceSubscriptionView",
+      "type": "object"
+    },
+    "SourceTemplate": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "homepage": {
+          "title": "Homepage",
+          "type": "string"
+        },
+        "canonical_seed": {
+          "title": "Canonical Seed",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "access_notes": {
+          "title": "Access Notes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "homepage",
+        "canonical_seed",
+        "kind",
+        "tags",
+        "access_notes"
+      ],
+      "title": "SourceTemplate",
+      "type": "object"
+    },
+    "TopicCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "positive_examples": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Positive Examples",
+          "type": "array"
+        },
+        "negative_examples": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Negative Examples",
+          "type": "array"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "entity_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Entity Ids",
+          "type": "array"
+        },
+        "questions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Questions",
+          "type": "array"
+        },
+        "analysis_template": {
+          "default": "technical",
+          "title": "Analysis Template",
+          "type": "string"
+        },
+        "priority": {
+          "default": 0,
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Priority",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "TopicCreate",
+      "type": "object"
+    },
+    "TopicPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "positive_examples": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Positive Examples"
+        },
+        "negative_examples": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Negative Examples"
+        },
+        "aliases": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aliases"
+        },
+        "entity_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entity Ids"
+        },
+        "questions": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Questions"
+        },
+        "analysis_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Analysis Template"
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "maximum": 10,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priority"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "active",
+                "paused",
+                "archived"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status"
+        }
+      },
+      "required": [
+        "expected_version"
+      ],
+      "title": "TopicPatch",
+      "type": "object"
+    },
+    "TopicView": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "positive_examples": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Positive Examples",
+          "type": "array"
+        },
+        "negative_examples": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Negative Examples",
+          "type": "array"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "entity_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Entity Ids",
+          "type": "array"
+        },
+        "questions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Questions",
+          "type": "array"
+        },
+        "analysis_template": {
+          "default": "technical",
+          "title": "Analysis Template",
+          "type": "string"
+        },
+        "priority": {
+          "default": 0,
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "industry_id": {
+          "format": "uuid",
+          "title": "Industry Id",
+          "type": "string"
+        },
+        "revision_id": {
+          "format": "uuid",
+          "title": "Revision Id",
+          "type": "string"
+        },
+        "row_version": {
+          "title": "Row Version",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "paused",
+            "archived"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "id",
+        "industry_id",
+        "revision_id",
+        "row_version",
+        "status"
+      ],
+      "title": "TopicView",
+      "type": "object"
+    },
+    "UserView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "login": {
+          "title": "Login",
+          "type": "string"
+        },
+        "timezone": {
+          "title": "Timezone",
+          "type": "string"
+        },
+        "csrf_token": {
+          "title": "Csrf Token",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "login",
+        "timezone",
+        "csrf_token"
+      ],
+      "title": "UserView",
+      "type": "object"
+    },
+    "VersionCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expected_version"
+      ],
+      "title": "VersionCommand",
+      "type": "object"
+    },
+    "WatchCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "topic_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Topic Ids",
+          "type": "array"
+        },
+        "entity_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Entity Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title",
+        "question"
+      ],
+      "title": "WatchCreate",
+      "type": "object"
+    },
+    "WatchPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "question": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Question"
+        },
+        "topic_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Topic Ids"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "open",
+                "resolved",
+                "paused"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status"
+        }
+      },
+      "required": [
+        "expected_version"
+      ],
+      "title": "WatchPatch",
+      "type": "object"
+    },
+    "WatchView": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "topic_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Topic Ids",
+          "type": "array"
+        },
+        "entity_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Entity Ids",
+          "type": "array"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "row_version": {
+          "title": "Row Version",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "open",
+            "resolved",
+            "paused"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "question",
+        "id",
+        "row_version",
+        "status"
+      ],
+      "title": "WatchView",
+      "type": "object"
+    },
+    "WindowRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "from_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Time"
+        },
+        "to_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To Time"
+        },
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        }
+      },
+      "title": "WindowRequest",
+      "type": "object"
+    },
+    "IndustryViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IndustryView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "TopicViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TopicView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SourceTemplatePage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceTemplate"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "FeedViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FeedView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SourceRunViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceRunView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SourceSubscriptionViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceSubscriptionView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "DocumentViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DocumentView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "DocumentRevisionViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DocumentRevisionView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "EntityViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EntityView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "EventCardPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventCard"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "WatchViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WatchView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ReviewViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReviewView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ConversationViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConversationView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MessageViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MessageView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ReportViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReportView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SearchHitPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SearchHit"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "JobViewPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JobView"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
