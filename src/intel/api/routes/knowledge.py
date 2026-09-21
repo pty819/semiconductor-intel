@@ -25,6 +25,7 @@ from intel.api.deps import (
 from intel.api.pagination import Page, PageParams, paginate
 from intel.repositories.base import IndustryScope
 from intel.repositories.knowledge import KnowledgeReadRepository
+from intel.services.errors import NotFound
 
 timeline_router = APIRouter(prefix="/industries/{industry_id}", tags=["timeline"])
 entities_router = APIRouter(
@@ -78,6 +79,8 @@ async def read_timeline(
 @timeline_router.get("/events/{event_id}")
 async def read_event(industry_id: UUID, event_id: UUID, repo: Repo) -> dict[str, Any]:
     card = await repo.get_event_card(event_id)
+    if card is None:
+        raise NotFound("event not found")
     return {"event": card}
 
 
@@ -162,4 +165,7 @@ async def list_evolutions(
 async def read_evolution(
     industry_id: UUID, topic_id: UUID, evolution_id: UUID, repo: Repo
 ) -> dict[str, Any]:
-    return await repo.get_evolution(evolution_id)
+    evolution = await repo.get_evolution(evolution_id)
+    if evolution is None:
+        raise NotFound("evolution not found")
+    return evolution

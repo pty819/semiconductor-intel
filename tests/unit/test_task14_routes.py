@@ -28,6 +28,7 @@ from intel.api.deps import (
     get_job_event_log,
     get_job_event_opener,
     get_jobs_repo,
+    get_knowledge_repo,
     get_principal,
     get_report_repo,
     get_review_repo,
@@ -302,6 +303,20 @@ def fast_hasher() -> PasswordHasher:
     )
 
 
+class FakeKnowledgeRepo:
+    """KnowledgeReadRepository double: event cards + evolutions by id."""
+
+    def __init__(self) -> None:
+        self.event_cards: dict[UUID, dict] = {}
+        self.evolutions: dict[UUID, dict] = {}
+
+    async def get_event_card(self, event_id: UUID) -> dict | None:
+        return self.event_cards.get(event_id)
+
+    async def get_evolution(self, evolution_id: UUID) -> dict | None:
+        return self.evolutions.get(evolution_id)
+
+
 @pytest.fixture()
 def harness():
     identity_repo = FakeIdentityRepo()
@@ -323,6 +338,7 @@ def harness():
     generation = FakeGenerationRepo()
     jobs = FakeJobsRepo(ALICE)
     event_log = FakeJobEventLog()
+    knowledge = FakeKnowledgeRepo()
 
     app = create_app()
     app.state.settings.session_pepper = PEPPER
@@ -347,6 +363,7 @@ def harness():
     app.dependency_overrides[get_document_repo] = lambda: documents
     app.dependency_overrides[get_generation_repo] = lambda: generation
     app.dependency_overrides[get_jobs_repo] = lambda: jobs
+    app.dependency_overrides[get_knowledge_repo] = lambda: knowledge
     app.dependency_overrides[get_job_event_log] = lambda: event_log
 
     @asynccontextmanager
@@ -370,6 +387,7 @@ def harness():
         "event_log": event_log,
         "generation": generation,
         "documents": documents,
+        "knowledge": knowledge,
     }
 
 
@@ -380,6 +398,69 @@ async def client(harness) -> httpx.AsyncClient:
         transport=transport, base_url="http://testserver"
     ) as client:
         yield client
+
+
+class TestKnowledgeNullBody404:
+    """I-8: missing event/evolution reads return the unified not_found
+    envelope (08 §1), never a 200 with {"event": None} / null body."""
+
+    async def test_missing_event_is_404_envelope(self, harness, client) -> None:
+        await add_user(harness, ALICE, "alice")
+        cookie, csrf = await login(client, "alice")
+        created = await create_industry(client, cookie, csrf)
+        industry_id = created.json()["id"]
+        resp = await client.get(
+            f"/api/v1/industries/{industry_id}/events/{uuid4()}",
+            cookies={"intel_session": cookie},
+        )
+        assert resp.status_code == 404
+        assert error_code(resp) == "not_found"
+
+    async def test_present_event_returns_body(self, harness, client) -> None:
+        await add_user(harness, ALICE, "alice")
+        cookie, csrf = await login(client, "alice")
+        created = await create_industry(client, cookie, csrf)
+        industry_id = created.json()["id"]
+        event_id = uuid4()
+        harness["knowledge"].event_cards[event_id] = {"id": event_id, "title": "t"}
+        resp = await client.get(
+            f"/api/v1/industries/{industry_id}/events/{event_id}",
+            cookies={"intel_session": cookie},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["event"]["id"] == str(event_id)
+
+    async def test_missing_evolution_is_404_envelope(self, harness, client) -> None:
+        await add_user(harness, ALICE, "alice")
+        cookie, csrf = await login(client, "alice")
+        created = await create_industry(client, cookie, csrf)
+        industry_id = created.json()["id"]
+        topic_id = uuid4()
+        resp = await client.get(
+            f"/api/v1/industries/{industry_id}/topics/{topic_id}/evolution/{uuid4()}",
+            cookies={"intel_session": cookie},
+        )
+        assert resp.status_code == 404
+        assert error_code(resp) == "not_found"
+
+    async def test_present_evolution_returns_body(self, harness, client) -> None:
+        await add_user(harness, ALICE, "alice")
+        cookie, csrf = await login(client, "alice")
+        created = await create_industry(client, cookie, csrf)
+        industry_id = created.json()["id"]
+        topic_id = uuid4()
+        evolution_id = uuid4()
+        harness["knowledge"].evolutions[evolution_id] = {
+            "id": evolution_id,
+            "topic_id": topic_id,
+        }
+        resp = await client.get(
+            f"/api/v1/industries/{industry_id}/topics/{topic_id}"
+            f"/evolution/{evolution_id}",
+            cookies={"intel_session": cookie},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["id"] == str(evolution_id)
 
 
 class TestRoutesRegistered:
