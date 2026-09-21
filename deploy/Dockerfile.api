@@ -1,8 +1,8 @@
 # API / worker / scheduler image. Build from the repo root:
 #   docker compose -f deploy/compose.yaml build api
 #
-# NOOA is an editable path dependency. Pass it as an additional build
-# context named `nooa` (compose sets this from $NOOA_SRC).
+# NOOA arrives as a git dependency (pinned commit in pyproject.toml /
+# uv.lock) — no extra build context needed.
 FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -11,26 +11,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH="/root/.local/bin:$PATH"
 
+# git: uv needs it to resolve the NOOA git dependency.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates build-essential \
+        curl ca-certificates build-essential git \
     && rm -rf /var/lib/apt/lists/* \
     && curl -LsSf https://astral.sh/uv/install.sh | sh
 
 WORKDIR /app
 
-# NOOA checkout (additional context `nooa`).
-COPY --from=nooa / /opt/nooa
-
 COPY pyproject.toml uv.lock README.md alembic.ini /app/
 COPY src /app/src
 COPY migrations /app/migrations
-
-# Rewrite the machine-local path in BOTH pyproject (`path = "..."`) and
-# uv.lock (`editable = "..."` / `source = { editable = "..." }`). A
-# `path =` only substitution leaves the lock pointing at the host and
-# `uv sync --frozen` fails in the image.
-RUN sed -i 's|/Users/liyifan/Documents/labs-OO-Agents|/opt/nooa|g' \
-        pyproject.toml uv.lock
 
 RUN uv sync --frozen --no-dev
 

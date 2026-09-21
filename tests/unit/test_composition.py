@@ -68,13 +68,23 @@ def test_cli_worker_help_is_offline() -> None:
     assert exc.value.code == 0
 
 
-def test_dockerfile_rewrites_lockfile_editable_path() -> None:
-    """uv.lock uses `editable = "..."`, not `path = "..."` — both must rewrite."""
+def test_nooa_is_a_git_pin_with_no_local_paths() -> None:
+    """NOOA comes from GitHub at a pinned rev; no host-local paths may leak
+    into pyproject/uv.lock/compose/Dockerfile (they break other machines)."""
     repo = Path(__file__).resolve().parents[2]
+    pyproject = (repo / "pyproject.toml").read_text()
+    assert 'nooa = { git = "https://github.com/NVIDIA-NeMo/labs-OO-Agents.git"' in pyproject
+    assert 'rev = "d4d46f78ae0eeaed7d18a466196601e8d16bc101"' in pyproject
     dockerfile = (repo / "deploy" / "Dockerfile.api").read_text()
-    assert "s|/Users/liyifan/Documents/labs-OO-Agents|/opt/nooa|g" in dockerfile
-    assert "pyproject.toml uv.lock" in dockerfile
-    assert 's|path = "/Users/liyifan/Documents/labs-OO-Agents"' not in dockerfile
+    compose = (repo / "deploy" / "compose.yaml").read_text()
+    lock = (repo / "uv.lock").read_text()
+    for name, text in (
+        ("pyproject", pyproject),
+        ("dockerfile", dockerfile),
+        ("compose", compose),
+        ("uv.lock", lock),
+    ):
+        assert "/Users/liyifan" not in text, f"local path leaked into {name}"
 
 
 class _Begin:

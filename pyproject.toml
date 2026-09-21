@@ -11,7 +11,8 @@ dependencies = [
   # browser binaries are NOT installed in the offline dev environment;
   # the renderer degrades to outcome=browser_unavailable instead.
   "playwright",
-  # NOOA agent framework, pinned to the local checkout (d4d46f7) via tool.uv.sources below.
+  # NOOA agent framework, pinned to an exact upstream commit via
+  # tool.uv.sources below (uv fetches it straight from GitHub).
   "nooa",
 ]
 
@@ -32,7 +33,7 @@ packages = ["src/intel"]
 dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]
 
 [tool.uv.sources]
-nooa = { path = "/Users/liyifan/Documents/labs-OO-Agents", editable = true }
+nooa = { git = "https://github.com/NVIDIA-NeMo/labs-OO-Agents.git", rev = "d4d46f78ae0eeaed7d18a466196601e8d16bc101" }
 
 [tool.pytest.ini_options]
 markers = ["integration: needs real Postgres", "live: needs network/provider"]

@@ -1,6 +1,6 @@
 # semiconductor-intel
 
-Semiconductor industry intelligence system built on the [NOOA agent framework](/Users/liyifan/Documents/labs-OO-Agents): it ingests news, filings, PDFs and other sources about the semiconductor industry, runs NOOA-driven extraction and knowledge pipelines whose proposals are committed only after Python-side validation, and serves the results over a FastAPI API backed by PostgreSQL (full-text + vector search). The `intel` package lives in `src/intel/`; NOOA is integrated as an editable path dependency pinned to the local checkout at commit `d4d46f7`.
+Semiconductor industry intelligence system built on the [NOOA agent framework](https://github.com/NVIDIA-NeMo/labs-OO-Agents): it ingests news, filings, PDFs and other sources about the semiconductor industry, runs NOOA-driven extraction and knowledge pipelines whose proposals are committed only after Python-side validation, and serves the results over a FastAPI API backed by PostgreSQL (full-text + vector search). The `intel` package lives in `src/intel/`; NOOA is a git dependency pinned to commit `d4d46f7` (see `[tool.uv.sources]` in pyproject.toml).
 
 Full design specification (16 docs + contracts): `/Users/liyifan/Documents/Codex/2026-09-19-agent/semiconductor-intel-design/`
 
@@ -59,7 +59,6 @@ Research jobs need `INTEL_GATEWAY_SECRET` (fail-closed when empty).
 
 ```bash
 export PG_PASSWORD=...
-export NOOA_SRC=/Users/liyifan/Documents/labs-OO-Agents
 docker compose -f deploy/compose.yaml config     # must pass
 # or: podman compose -f deploy/compose.yaml config
 docker compose -f deploy/compose.yaml up --build

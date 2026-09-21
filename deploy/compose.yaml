@@ -30,8 +30,6 @@ x-app-environment: &app-environment
 x-app-build: &app-build
   context: ..
   dockerfile: deploy/Dockerfile.api
-  additional_contexts:
-    nooa: ${NOOA_SRC:-/Users/liyifan/Documents/labs-OO-Agents}
 
 x-app-volumes: &app-volumes
   - objects:/var/lib/intel/objects
