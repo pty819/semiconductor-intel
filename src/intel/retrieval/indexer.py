@@ -17,10 +17,12 @@ Embedding seam (Task 11 wires the L1 route client):
 
 Idempotency: chunk inserts conflict-do-nothing on UNIQUE(parse, ordinal);
 the job's idempotency key already carries chunker/embedding versions.
-Documented v1 limitation: a NEW chunker_version re-running over an
-already-chunked parse conflicts on (parse, ordinal) and keeps the OLD
-rows — chunk-row replacement belongs to the index_generation rebuild
-flow (03 §8), not to this handler.
+Version drift fails LOUDLY before any insert: a payload chunker_version
+that disagrees with the running code, existing rows from a different
+chunker output (text/ordinal mismatch), or rows carrying a different
+non-NULL embedding version all raise a JobFailure — the full
+dual-write/backfill/switch rebuild remains the deferred index_generation
+flow (03 §8), but it can no longer masquerade as a no-op re-run.
 
 Coverage: :meth:`IndexStore.bump_coverage_watermark` advances matching
 running ``coverage_batches`` rows (phase='index', window contains now);
@@ -163,6 +165,13 @@ class IndexStore(Protocol):
 
     async def get_parse(self, parse_id: UUID) -> ParsedArtifactRecord | None: ...
 
+    async def get_parse_chunks(
+        self, parse_id: UUID
+    ) -> list[tuple[int, str | None, str | None]]:
+        """Rows already present for the parse:
+        ``(ordinal, chunk_text, embedding_model_version)`` — the drift
+        check compares them against what THIS run is about to write."""
+
     async def insert_chunks(
         self, records: Sequence[ChunkRecord]
     ) -> list[tuple[int, bool]]:
@@ -219,6 +228,24 @@ class SqlAlchemyIndexStore(ScopedRepository, IndexStore):
             )
         ).scalar_one_or_none()
         return None if row is None else _parse_record_from_row(row)
+
+    async def get_parse_chunks(
+        self, parse_id: UUID
+    ) -> list[tuple[int, str | None, str | None]]:
+        await self._bind_owner()
+        rows = (
+            await self.conn.execute(
+                select(
+                    Chunk.ordinal,
+                    Chunk.chunk_text,
+                    Chunk.embedding_model_version,
+                ).where(
+                    Chunk.owner_id == self.owner_id,
+                    Chunk.parsed_artifact_id == parse_id,
+                )
+            )
+        ).all()
+        return [(int(row[0]), row[1], row[2]) for row in rows]
 
     async def insert_chunks(
         self, records: Sequence[ChunkRecord]
@@ -340,7 +367,49 @@ def make_index_handler(wiring: IndexWiring) -> JobHandler:
             for chunk, vector in zip(chunks, vectors, strict=True)
         ]
 
+        # Payload/code agreement: the manifest must never label rows with
+        # a chunker version the running code did not execute.
+        payload_chunker_version = str(payload.get("chunker_version", CHUNKER_VERSION))
+        if payload_chunker_version != CHUNKER_VERSION:
+            raise JobFailure(
+                "chunker_version_mismatch",
+                f"payload chunker_version {payload_chunker_version} != running"
+                f" {CHUNKER_VERSION}; refusing to mislabel the manifest",
+            )
+
         async with wiring.open_store(ctx.scope) as store:
+            existing = await store.get_parse_chunks(parse_id)
+            # Version drift against rows already present (03 §8): the
+            # dual-write/backfill/switch rebuild flow is deferred (ledger),
+            # so a bumped chunker that would silently keep OLD rows via
+            # conflict-do-nothing fails loudly instead; same-version
+            # re-runs stay idempotent (identical text, same ordinals).
+            existing_by_ordinal = {ordinal: text for ordinal, text, _ in existing}
+            new_by_ordinal = {record.ordinal: record.text for record in records}
+            if existing and (
+                set(existing_by_ordinal) != set(new_by_ordinal)
+                or any(
+                    existing_by_ordinal[ordinal] != text
+                    for ordinal, text in new_by_ordinal.items()
+                )
+            ):
+                raise JobFailure(
+                    "chunker_version_drift",
+                    f"parse {parse_id} already has chunks from a different"
+                    " chunker output; index_generation rebuild (03 §8)"
+                    " required, refusing to silently keep the old rows",
+                )
+            embedded_versions = {
+                version for _, _, version in existing if version is not None
+            }
+            drifted = embedded_versions - {wiring.embedder.version}
+            if drifted:
+                raise JobFailure(
+                    "embedding_version_mismatch",
+                    f"parse {parse_id} rows carry embedding versions"
+                    f" {sorted(drifted)} != {wiring.embedder.version};"
+                    " rebuild required (03 §8)",
+                )
             outcomes = await store.insert_chunks(records)
             await store.bump_coverage_watermark(phase="index", now=wiring.clock())
 

@@ -66,6 +66,19 @@ class InMemoryIndexStore:
     async def get_parse(self, parse_id: UUID) -> ParsedArtifactRecord | None:
         return self.parses.get(parse_id)
 
+    async def get_parse_chunks(
+        self, parse_id: UUID
+    ) -> list[tuple[int, str | None, str | None]]:
+        return [
+            (
+                row["ordinal"],
+                row["text"],
+                row["embedding_model_version"],
+            )
+            for row in self.rows.values()
+            if row["parsed_artifact_id"] == parse_id
+        ]
+
     async def insert_chunks(self, records: list[ChunkRecord]) -> list[tuple[int, bool]]:
         out: list[tuple[int, bool]] = []
         for record in records:
@@ -170,6 +183,7 @@ async def _enqueue_index(
     parse_id: UUID,
     *,
     key_suffix: str = "",
+    chunker_version: str | None = None,
 ) -> UUID:
     job, created = await service.enqueue(
         InMemoryJobsStore(db),
@@ -177,7 +191,7 @@ async def _enqueue_index(
         kind="index",
         payload={
             "parse_id": str(parse_id),
-            "chunker_version": CHUNKER_VERSION,
+            "chunker_version": chunker_version or CHUNKER_VERSION,
             "embedding_version": NOOP_EMBEDDING_VERSION,
         },
         idempotency_key=f"index:{OWNER}/{parse_id}/{CHUNKER_VERSION}"
@@ -260,6 +274,56 @@ class TestIndexHandler:
             second.progress["manifest"]["completed_ordinals"]
             == (first.progress["manifest"]["completed_ordinals"])
         )
+
+    async def test_payload_chunker_version_mismatch_fails_loudly(self) -> None:
+        """I-9: the manifest must never label rows with a chunker version
+        the running code did not execute."""
+        parse = _parse_record()
+        store = InMemoryIndexStore({parse.id: parse})
+        runner, db, service = make_runner(store)
+        await _enqueue_index(service, db, parse.id, chunker_version="chunker@old")
+        job = await runner.run_once()
+        assert job is not None and job.state == "failed"
+        assert job.error["code"] == "chunker_version_mismatch"
+        assert not store.rows
+
+    async def test_existing_rows_from_other_chunker_fail_loudly(self) -> None:
+        """I-9: conflict-do-nothing would silently keep OLD rows while the
+        manifest reports the new version — refuse instead."""
+        parse = _parse_record()
+        store = InMemoryIndexStore({parse.id: parse})
+        runner, db, service = make_runner(store)
+        await _enqueue_index(service, db, parse.id)
+        first = await runner.run_once()
+        assert first is not None and first.state == "succeeded"
+        # Corrupt one row's text: what a different chunker output looks like.
+        some_row = next(iter(store.rows.values()))
+        some_row["text"] = some_row["text"] + " [rechunked]"
+        rows_before = dict(store.rows)
+
+        await _enqueue_index(service, db, parse.id, key_suffix=":rechunk")
+        second = await runner.run_once()
+        assert second is not None and second.state == "failed"
+        assert second.error["code"] == "chunker_version_drift"
+        assert store.rows == rows_before
+
+    async def test_existing_embedding_version_drift_fails_loudly(self) -> None:
+        parse = _parse_record()
+        store = InMemoryIndexStore({parse.id: parse})
+        runner, db, service = make_runner(store)
+        await _enqueue_index(service, db, parse.id)
+        first = await runner.run_once()
+        assert first is not None and first.state == "succeeded"
+        # Pretend a real embedder wrote these rows under another version;
+        # NULL-embedding rows would NOT trip this (they are a pending gap).
+        for row in store.rows.values():
+            row["embedding_model_version"] = "embedding@real-9"
+            row["embedding"] = [0.1]
+
+        await _enqueue_index(service, db, parse.id, key_suffix=":reembed")
+        second = await runner.run_once()
+        assert second is not None and second.state == "failed"
+        assert second.error["code"] == "embedding_version_mismatch"
 
     async def test_missing_parse_fails_with_clear_class(self) -> None:
         store = InMemoryIndexStore({})
